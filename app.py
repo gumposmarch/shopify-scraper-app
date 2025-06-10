@@ -38,26 +38,49 @@ def is_shopify_store(url):
     except:
         return False
 
-def get_products_json(store_url):
-    """Get products from Shopify's products.json endpoint"""
+def get_products_json(store_url, limit=250):
+    """Get products from Shopify's products.json endpoint with pagination"""
     try:
         # Clean and format the URL
         if not store_url.startswith(('http://', 'https://')):
             store_url = 'https://' + store_url
         
-        # Remove trailing slash and add products.json
         base_url = store_url.rstrip('/')
-        products_url = f"{base_url}/products.json"
+        all_products = []
+        page = 1
         
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
-        response = requests.get(products_url, headers=headers, timeout=15)
-        response.raise_for_status()
+        while True:
+            # Try pagination with limit and page parameters
+            products_url = f"{base_url}/products.json?limit={limit}&page={page}"
+            
+            response = requests.get(products_url, headers=headers, timeout=15)
+            response.raise_for_status()
+            
+            data = response.json()
+            products = data.get('products', [])
+            
+            if not products:  # No more products
+                break
+                
+            all_products.extend(products)
+            
+            # If we got fewer products than the limit, we're done
+            if len(products) < limit:
+                break
+                
+            page += 1
+            time.sleep(0.5)  # Be respectful with pagination
+            
+            # Safety check to prevent infinite loops
+            if page > 50:  # Max 50 pages
+                st.warning("Reached maximum pagination limit (50 pages)")
+                break
         
-        data = response.json()
-        return data.get('products', [])
+        return all_products
     
     except requests.exceptions.RequestException as e:
         st.error(f"Network error: {str(e)}")
@@ -68,6 +91,111 @@ def get_products_json(store_url):
     except Exception as e:
         st.error(f"Error fetching products: {str(e)}")
         return None
+
+def get_collections_and_products(store_url):
+    """Get products by scraping through collections"""
+    try:
+        if not store_url.startswith(('http://', 'https://')):
+            store_url = 'https://' + store_url
+        
+        base_url = store_url.rstrip('/')
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        # First, try to get collections
+        collections_url = f"{base_url}/collections.json"
+        response = requests.get(collections_url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            collections_data = response.json()
+            collections = collections_data.get('collections', [])
+            
+            all_products = []
+            collection_products = {}
+            
+            for collection in collections:
+                collection_handle = collection.get('handle')
+                if collection_handle:
+                    # Get products from each collection
+                    collection_url = f"{base_url}/collections/{collection_handle}/products.json"
+                    
+                    try:
+                        coll_response = requests.get(collection_url, headers=headers, timeout=10)
+                        if coll_response.status_code == 200:
+                            coll_data = coll_response.json()
+                            products = coll_data.get('products', [])
+                            collection_products[collection.get('title', collection_handle)] = len(products)
+                            
+                            # Add collection info to products
+                            for product in products:
+                                product['collection'] = collection.get('title', collection_handle)
+                            
+                            all_products.extend(products)
+                            time.sleep(0.3)  # Be respectful
+                    except:
+                        continue
+            
+            # Remove duplicates based on product ID
+            seen_ids = set()
+            unique_products = []
+            for product in all_products:
+                product_id = product.get('id')
+                if product_id not in seen_ids:
+                    seen_ids.add(product_id)
+                    unique_products.append(product)
+            
+            return unique_products, collection_products
+        
+        return [], {}
+    
+    except Exception as e:
+        st.error(f"Error fetching collections: {str(e)}")
+        return [], {}
+
+def scrape_sitemap_products(store_url):
+    """Try to get product URLs from sitemap"""
+    try:
+        if not store_url.startswith(('http://', 'https://')):
+            store_url = 'https://' + store_url
+        
+        base_url = store_url.rstrip('/')
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        # Try common sitemap locations
+        sitemap_urls = [
+            f"{base_url}/sitemap.xml",
+            f"{base_url}/sitemap_products_1.xml",
+            f"{base_url}/products.xml"
+        ]
+        
+        product_urls = []
+        
+        for sitemap_url in sitemap_urls:
+            try:
+                response = requests.get(sitemap_url, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.content, 'xml')
+                    
+                    # Find all URLs that contain '/products/'
+                    for url_tag in soup.find_all('url'):
+                        loc_tag = url_tag.find('loc')
+                        if loc_tag and '/products/' in loc_tag.text:
+                            product_urls.append(loc_tag.text)
+                    
+                    if product_urls:
+                        break  # Found products in this sitemap
+                        
+            except:
+                continue
+        
+        return product_urls[:100]  # Limit to first 100 for performance
+    
+    except Exception as e:
+        st.error(f"Error scraping sitemap: {str(e)}")
+        return []
 
 def parse_product_data(products):
     """Parse product data into a structured format"""
@@ -142,25 +270,39 @@ def main():
         st.write("")  # Add some spacing
         scrape_button = st.button("🔍 Scrape Products", type="primary")
     
+    # Scraping method selection
+    st.subheader("🔧 Scraping Method")
+    scraping_method = st.radio(
+        "Choose scraping approach:",
+        ["Standard JSON API", "Paginated JSON API", "Collections-based Scraping", "All Methods Combined"],
+        help="Different methods to extract more comprehensive product data"
+    )
+    
     # Information section
     with st.expander("ℹ️ How it works", expanded=False):
         st.markdown("""
-        **This tool extracts product data from Shopify stores by:**
-        1. Accessing the store's `/products.json` endpoint
-        2. Parsing the JSON response to extract product information
-        3. Organizing the data into a readable format
+        **This tool offers multiple scraping approaches:**
+        
+        **1. Standard JSON API** - Uses `/products.json` (fastest, but may miss products)
+        **2. Paginated JSON API** - Goes through multiple pages of products
+        **3. Collections-based** - Scrapes products from each collection separately
+        **4. All Methods Combined** - Uses all approaches for maximum coverage
         
         **Data extracted includes:**
         - Product titles, descriptions, and handles
         - Pricing and inventory information
         - Product images and variants
         - Tags, vendor information, and more
+        - Collection information (when available)
         
-        **Note:** This tool only works with stores that have public product data access enabled.
+        **Note:** Different methods may return different amounts of data. Some stores restrict access to certain endpoints.
         """)
     
     # Scraping logic
     if scrape_button and store_url:
+        all_products = []
+        collection_info = {}
+        
         with st.spinner("Scraping products... Please wait"):
             # Validate if it's a Shopify store
             with st.status("Validating Shopify store...", expanded=True) as status:
@@ -168,26 +310,78 @@ def main():
                     st.warning("⚠️ This doesn't appear to be a Shopify store or the store is not accessible.")
                 status.update(label="Shopify store validated ✅", state="complete")
             
-            # Fetch products
-            with st.status("Fetching product data...", expanded=True) as status:
-                products = get_products_json(store_url)
+            # Execute scraping based on selected method
+            if scraping_method == "Standard JSON API":
+                with st.status("Fetching products via standard API...", expanded=True) as status:
+                    products = get_products_json(store_url, limit=50)  # Standard limit
+                    if products:
+                        all_products = products
+                    status.update(label=f"Standard API: {len(all_products)} products ✅", state="complete")
+                    
+            elif scraping_method == "Paginated JSON API":
+                with st.status("Fetching products via paginated API...", expanded=True) as status:
+                    products = get_products_json(store_url, limit=250)  # Higher limit with pagination
+                    if products:
+                        all_products = products
+                    status.update(label=f"Paginated API: {len(all_products)} products ✅", state="complete")
+                    
+            elif scraping_method == "Collections-based Scraping":
+                with st.status("Fetching products via collections...", expanded=True) as status:
+                    products, collections = get_collections_and_products(store_url)
+                    if products:
+                        all_products = products
+                        collection_info = collections
+                    status.update(label=f"Collections method: {len(all_products)} products from {len(collection_info)} collections ✅", state="complete")
+                    
+            elif scraping_method == "All Methods Combined":
+                # Method 1: Standard JSON
+                with st.status("Method 1: Standard JSON API...", expanded=True) as status:
+                    products1 = get_products_json(store_url, limit=50)
+                    if products1:
+                        all_products.extend(products1)
+                    status.update(label=f"Standard API: {len(products1) if products1 else 0} products ✅", state="complete")
                 
-                if products is None:
-                    st.stop()
-                elif len(products) == 0:
-                    st.warning("No products found. The store might be empty or have restricted access.")
-                    st.stop()
+                # Method 2: Paginated JSON
+                with st.status("Method 2: Paginated JSON API...", expanded=True) as status:
+                    products2 = get_products_json(store_url, limit=250)
+                    if products2:
+                        # Add any new products not already found
+                        existing_ids = {p.get('id') for p in all_products}
+                        new_products = [p for p in products2 if p.get('id') not in existing_ids]
+                        all_products.extend(new_products)
+                    status.update(label=f"Paginated API: {len(products2) if products2 else 0} products ✅", state="complete")
                 
-                status.update(label=f"Found {len(products)} products ✅", state="complete")
+                # Method 3: Collections
+                with st.status("Method 3: Collections-based scraping...", expanded=True) as status:
+                    products3, collections = get_collections_and_products(store_url)
+                    if products3:
+                        # Add any new products not already found
+                        existing_ids = {p.get('id') for p in all_products}
+                        new_products = [p for p in products3 if p.get('id') not in existing_ids]
+                        all_products.extend(new_products)
+                        collection_info = collections
+                    status.update(label=f"Collections: {len(products3) if products3 else 0} products from {len(collection_info)} collections ✅", state="complete")
             
-            # Parse and display data
-            with st.status("Processing product data...", expanded=True) as status:
-                parsed_products = parse_product_data(products)
-                df = pd.DataFrame(parsed_products)
-                status.update(label="Data processing complete ✅", state="complete")
+            if not all_products:
+                st.warning("No products found. The store might be empty, have restricted access, or use a different structure.")
+                st.stop()
+        
+        # Parse and display data
+        with st.status("Processing product data...", expanded=True) as status:
+            parsed_products = parse_product_data(all_products)
+            df = pd.DataFrame(parsed_products)
+            status.update(label="Data processing complete ✅", state="complete")
         
         # Display results
         st.success(f"✅ Successfully scraped {len(parsed_products)} products!")
+        
+        # Show collection information if available
+        if collection_info:
+            st.info(f"📂 Found products across {len(collection_info)} collections:")
+            cols = st.columns(min(4, len(collection_info)))
+            for i, (collection_name, count) in enumerate(collection_info.items()):
+                with cols[i % len(cols)]:
+                    st.metric(collection_name, f"{count} products")
         
         # Metrics
         col1, col2, col3, col4 = st.columns(4)
