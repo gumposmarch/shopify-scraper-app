@@ -757,7 +757,7 @@ def main():
             status.update(label="Data processing complete ✅", state="complete")
         
         # Display results
-        st.success(f"✅ Successfully scraped {len(parsed_products)} products!")
+        st.success(f"✅ Successfully scraped {len(all_products)} products!")
         
         # Show collection information if available
         if collection_info:
