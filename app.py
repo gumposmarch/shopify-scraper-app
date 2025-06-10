@@ -161,8 +161,26 @@ def parse_product_data(products):
         # Get first variant for pricing (most Shopify stores have at least one variant)
         first_variant = product.get('variants', [{}])[0]
         
-        # Get first image
-        first_image = product.get('images', [{}])[0].get('src', '') if product.get('images') else ''
+        # Get all images
+        images = product.get('images', [])
+        first_image = images[0].get('src', '') if images else ''
+        
+        # Create list of all image URLs
+        all_image_urls = [img.get('src', '') for img in images if img.get('src')]
+        
+        # Get variant images (images specific to variants)
+        variant_images = []
+        for variant in product.get('variants', []):
+            if variant.get('image_id'):
+                # Find the image that matches this variant
+                variant_img = next((img for img in images if img.get('id') == variant.get('image_id')), None)
+                if variant_img and variant_img.get('src'):
+                    variant_images.append({
+                        'variant_title': variant.get('title', ''),
+                        'variant_sku': variant.get('sku', ''),
+                        'image_url': variant_img.get('src', ''),
+                        'image_alt': variant_img.get('alt', '')
+                    })
         
         parsed_product = {
             'Title': product.get('title', ''),
@@ -179,8 +197,10 @@ def parse_product_data(products):
             'Updated At': product.get('updated_at', ''),
             'Published At': product.get('published_at', ''),
             'Image URL': first_image,
+            'All Images': ' | '.join(all_image_urls),  # All images separated by |
             'Variants Count': len(product.get('variants', [])),
             'Images Count': len(product.get('images', [])),
+            'Variant Images': json.dumps(variant_images) if variant_images else '',  # JSON string of variant-specific images
             'Description': BeautifulSoup(product.get('body_html', ''), 'html.parser').get_text()[:200] + '...' if product.get('body_html') else ''
         }
         
@@ -379,8 +399,56 @@ def main():
         if product_type_filter:
             filtered_df = filtered_df[filtered_df['Product Type'].isin(product_type_filter)]
         
-        # Display filtered data
+        # Display filtered data with image preview
         st.dataframe(filtered_df, use_container_width=True)
+        
+        # Image gallery section
+        if len(filtered_df) > 0:
+            st.subheader("🖼️ Product Image Gallery")
+            
+            # Select product for image viewing
+            product_titles = filtered_df['Title'].tolist()
+            selected_product = st.selectbox(
+                "Select a product to view all images:",
+                options=product_titles,
+                help="Choose a product to see all its images"
+            )
+            
+            if selected_product:
+                product_row = filtered_df[filtered_df['Title'] == selected_product].iloc[0]
+                all_images = product_row['All Images']
+                variant_images_json = product_row['Variant Images']
+                
+                if all_images:
+                    st.write(f"**All Images for: {selected_product}**")
+                    image_urls = [url.strip() for url in all_images.split('|') if url.strip()]
+                    
+                    # Display images in columns
+                    cols_per_row = 4
+                    for i in range(0, len(image_urls), cols_per_row):
+                        cols = st.columns(cols_per_row)
+                        for j, url in enumerate(image_urls[i:i+cols_per_row]):
+                            with cols[j]:
+                                try:
+                                    st.image(url, caption=f"Image {i+j+1}", use_container_width=True)
+                                    st.text(f"URL: {url[:50]}...")
+                                except:
+                                    st.text(f"❌ Failed to load: {url[:50]}...")
+                
+                # Show variant-specific images if available
+                if variant_images_json:
+                    try:
+                        variant_images = json.loads(variant_images_json)
+                        if variant_images:
+                            st.write("**Variant-Specific Images:**")
+                            for variant_img in variant_images:
+                                st.write(f"**{variant_img.get('variant_title', 'Unknown Variant')}** (SKU: {variant_img.get('variant_sku', 'N/A')})")
+                                try:
+                                    st.image(variant_img['image_url'], caption=variant_img.get('image_alt', ''), width=200)
+                                except:
+                                    st.text(f"❌ Failed to load variant image: {variant_img['image_url'][:50]}...")
+                    except:
+                        pass
         
         # Download section
         st.subheader("💾 Download Data")
