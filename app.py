@@ -182,50 +182,6 @@ def get_collections_and_products(store_url):
         st.error(f"Error fetching collections: {str(e)}")
         return [], {}
 
-def scrape_sitemap_products(store_url):
-    """Try to get product URLs from sitemap"""
-    try:
-        if not store_url.startswith(('http://', 'https://')):
-            store_url = 'https://' + store_url
-        
-        base_url = store_url.rstrip('/')
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        # Try common sitemap locations
-        sitemap_urls = [
-            f"{base_url}/sitemap.xml",
-            f"{base_url}/sitemap_products_1.xml",
-            f"{base_url}/products.xml"
-        ]
-        
-        product_urls = []
-        
-        for sitemap_url in sitemap_urls:
-            try:
-                response = requests.get(sitemap_url, headers=headers, timeout=10)
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.content, 'xml')
-                    
-                    # Find all URLs that contain '/products/'
-                    for url_tag in soup.find_all('url'):
-                        loc_tag = url_tag.find('loc')
-                        if loc_tag and '/products/' in loc_tag.text:
-                            product_urls.append(loc_tag.text)
-                    
-                    if product_urls:
-                        break  # Found products in this sitemap
-                        
-            except:
-                continue
-        
-        return product_urls[:100]  # Limit to first 100 for performance
-    
-    except Exception as e:
-        st.error(f"Error scraping sitemap: {str(e)}")
-        return []
-
 def get_wordpress_products_woocommerce_api(store_url):
     """Try to get products via WooCommerce REST API"""
     try:
@@ -408,6 +364,43 @@ def extract_product_from_html(product_element, base_url):
     except Exception as e:
         return None
 
+def parse_shopify_product_data(products, platform='shopify'):
+    """Parse Shopify product data into a structured format"""
+    parsed_products = []
+    
+    for product in products:
+        # Get first variant for pricing (most Shopify stores have at least one variant)
+        first_variant = product.get('variants', [{}])[0]
+        
+        # Get first image
+        first_image = product.get('images', [{}])[0].get('src', '') if product.get('images') else ''
+        
+        parsed_product = {
+            'Title': product.get('title', ''),
+            'Handle': product.get('handle', ''),
+            'Product Type': product.get('product_type', ''),
+            'Vendor': product.get('vendor', ''),
+            'Price': first_variant.get('price', '0'),
+            'Compare At Price': first_variant.get('compare_at_price', ''),
+            'Available': first_variant.get('available', False),
+            'Inventory Quantity': first_variant.get('inventory_quantity', 0),
+            'Weight': first_variant.get('weight', 0),
+            'Tags': ', '.join(product.get('tags', [])),
+            'Created At': product.get('created_at', ''),
+            'Updated At': product.get('updated_at', ''),
+            'Published At': product.get('published_at', ''),
+            'Image URL': first_image,
+            'Variants Count': len(product.get('variants', [])),
+            'Images Count': len(product.get('images', [])),
+            'Description': BeautifulSoup(product.get('body_html', ''), 'html.parser').get_text()[:200] + '...' if product.get('body_html') else '',
+            'Platform': f'Shopify ({platform})',
+            'Product URL': ''
+        }
+        
+        parsed_products.append(parsed_product)
+    
+    return parsed_products
+
 def parse_wordpress_woocommerce_data(products):
     """Parse WooCommerce API product data"""
     parsed_products = []
@@ -431,7 +424,8 @@ def parse_wordpress_woocommerce_data(products):
             'Variants Count': len(product.get('variations', [])),
             'Images Count': len(product.get('images', [])),
             'Description': BeautifulSoup(product.get('short_description', ''), 'html.parser').get_text()[:200] + '...' if product.get('short_description') else '',
-            'Platform': 'WordPress/WooCommerce'
+            'Platform': 'WordPress/WooCommerce',
+            'Product URL': product.get('permalink', '')
         }
         
         parsed_products.append(parsed_product)
@@ -461,42 +455,8 @@ def parse_wordpress_html_data(products):
             'Variants Count': 0,
             'Images Count': 1 if product.get('image_url') else 0,
             'Description': product.get('description', ''),
-            'Product URL': product.get('url', ''),
-            'Platform': 'WordPress (HTML)'
-        }
-        
-        parsed_products.append(parsed_product)
-    
-    return parsed_products
-    """Parse product data into a structured format"""
-    parsed_products = []
-    
-    for product in products:
-        # Get first variant for pricing (most Shopify stores have at least one variant)
-        first_variant = product.get('variants', [{}])[0]
-        
-        # Get first image
-        first_image = product.get('images', [{}])[0].get('src', '') if product.get('images') else ''
-        
-        parsed_product = {
-            'Title': product.get('title', ''),
-            'Handle': product.get('handle', ''),
-            'Product Type': product.get('product_type', ''),
-            'Vendor': product.get('vendor', ''),
-            'Price': first_variant.get('price', '0'),
-            'Compare At Price': first_variant.get('compare_at_price', ''),
-            'Available': first_variant.get('available', False),
-            'Inventory Quantity': first_variant.get('inventory_quantity', 0),
-            'Weight': first_variant.get('weight', 0),
-            'Tags': ', '.join(product.get('tags', [])),
-            'Created At': product.get('created_at', ''),
-            'Updated At': product.get('updated_at', ''),
-            'Published At': product.get('published_at', ''),
-            'Image URL': first_image,
-            'Variants Count': len(product.get('variants', [])),
-            'Images Count': len(product.get('images', [])),
-            'Description': BeautifulSoup(product.get('body_html', ''), 'html.parser').get_text()[:200] + '...' if product.get('body_html') else '',
-            'Platform': f'Shopify ({platform})'
+            'Platform': 'WordPress (HTML)',
+            'Product URL': product.get('url', '')
         }
         
         parsed_products.append(parsed_product)
@@ -587,7 +547,7 @@ def main():
     
     # Main scrape button
     scrape_button = st.button("🚀 Start Scraping", type="primary", use_container_width=True)
-    
+
     # Information section
     with st.expander("ℹ️ How it works", expanded=False):
         st.markdown("""
@@ -640,7 +600,7 @@ def main():
                     with st.status("Shopify: Standard JSON API...", expanded=True) as status:
                         products = get_products_json(store_url, limit=50)
                         if products:
-                            parsed = parse_product_data(products, 'Standard API')
+                            parsed = parse_shopify_product_data(products, 'Standard API')
                             all_products.extend(parsed)
                             scraping_results['Shopify Standard'] = len(parsed)
                         status.update(label=f"Shopify Standard: {len(products) if products else 0} products ✅", state="complete")
@@ -652,7 +612,7 @@ def main():
                             # Remove duplicates
                             existing_ids = {p.get('Title', '') + p.get('Handle', '') for p in all_products}
                             new_products = [p for p in products if (p.get('title', '') + p.get('handle', '')) not in existing_ids]
-                            parsed = parse_product_data(new_products, 'Paginated API')
+                            parsed = parse_shopify_product_data(new_products, 'Paginated API')
                             all_products.extend(parsed)
                             scraping_results['Shopify Paginated'] = len(parsed)
                         status.update(label=f"Shopify Paginated: {len(products) if products else 0} products ✅", state="complete")
@@ -663,7 +623,7 @@ def main():
                         if products:
                             existing_ids = {p.get('Title', '') + p.get('Handle', '') for p in all_products}
                             new_products = [p for p in products if (p.get('title', '') + p.get('handle', '')) not in existing_ids]
-                            parsed = parse_product_data(new_products, 'Collections')
+                            parsed = parse_shopify_product_data(new_products, 'Collections')
                             all_products.extend(parsed)
                             collection_info = collections
                             scraping_results['Shopify Collections'] = len(parsed)
@@ -722,85 +682,56 @@ def main():
             for i, (collection_name, count) in enumerate(collection_info.items()):
                 with cols[i % len(cols)]:
                     st.metric(collection_name, f"{count} products")
-                    if products1:
-                        all_products.extend(products1)
-                    status.update(label=f"Standard API: {len(products1) if products1 else 0} products ✅", state="complete")
-                
-                # Method 2: Paginated JSON
-                with st.status("Method 2: Paginated JSON API...", expanded=True) as status:
-                    products2 = get_products_json(store_url, limit=250)
-                    if products2:
-                        # Add any new products not already found
-                        existing_ids = {p.get('id') for p in all_products}
-                        new_products = [p for p in products2 if p.get('id') not in existing_ids]
-                        all_products.extend(new_products)
-                    status.update(label=f"Paginated API: {len(products2) if products2 else 0} products ✅", state="complete")
-                
-                # Method 3: Collections
-                with st.status("Method 3: Collections-based scraping...", expanded=True) as status:
-                    products3, collections = get_collections_and_products(store_url)
-                    if products3:
-                        # Add any new products not already found
-                        existing_ids = {p.get('id') for p in all_products}
-                        new_products = [p for p in products3 if p.get('id') not in existing_ids]
-                        all_products.extend(new_products)
-                        collection_info = collections
-                    status.update(label=f"Collections: {len(products3) if products3 else 0} products from {len(collection_info)} collections ✅", state="complete")
-            
-            if not all_products:
-                st.warning("No products found. The store might be empty, have restricted access, or use a different structure.")
-                st.stop()
         
-        # Parse and display data
-        with st.status("Processing product data...", expanded=True) as status:
-            df = pd.DataFrame(all_products)
-            status.update(label="Data processing complete ✅", state="complete")
-        
-        # Display results
-        st.success(f"✅ Successfully scraped {len(all_products)} products!")
-        
-        # Show collection information if available
-        if collection_info:
-            st.info(f"📂 Found products across {len(collection_info)} collections:")
-            cols = st.columns(min(4, len(collection_info)))
-            for i, (collection_name, count) in enumerate(collection_info.items()):
-                with cols[i % len(cols)]:
-                    st.metric(collection_name, f"{count} products")
+        # Create DataFrame for display
+        df = pd.DataFrame(all_products)
         
         # Metrics
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Products", len(parsed_products))
+            st.metric("Total Products", len(all_products))
         with col2:
-            available_products = sum(1 for p in parsed_products if p['Available'])
+            available_products = sum(1 for p in all_products if p.get('Available', False))
             st.metric("Available Products", available_products)
         with col3:
-            unique_vendors = len(set(p['Vendor'] for p in parsed_products if p['Vendor']))
-            st.metric("Unique Vendors", unique_vendors)
+            platforms = list(set(p.get('Platform', 'Unknown') for p in all_products))
+            st.metric("Platforms Found", len(platforms))
         with col4:
-            avg_price = sum(float(p['Price']) for p in parsed_products if p['Price']) / len(parsed_products)
+            prices = [float(str(p.get('Price', 0)).replace('$', '').replace(',', '')) for p in all_products if p.get('Price') and str(p.get('Price', '')).replace('$', '').replace(',', '').replace('.', '').isdigit()]
+            avg_price = sum(prices) / len(prices) if prices else 0
             st.metric("Average Price", f"${avg_price:.2f}")
         
         # Data table
         st.subheader("📋 Product Data")
         
         # Filters
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            vendor_filter = st.multiselect(
-                "Filter by Vendor:",
-                options=sorted(list(set(p['Vendor'] for p in parsed_products if p['Vendor']))),
+            platforms_available = sorted(list(set(p.get('Platform', '') for p in all_products if p.get('Platform'))))
+            platform_filter = st.multiselect(
+                "Filter by Platform:",
+                options=platforms_available,
                 default=[]
             )
         with col2:
+            vendors_available = sorted(list(set(p.get('Vendor', '') for p in all_products if p.get('Vendor'))))
+            vendor_filter = st.multiselect(
+                "Filter by Vendor:",
+                options=vendors_available,
+                default=[]
+            )
+        with col3:
+            types_available = sorted(list(set(p.get('Product Type', '') for p in all_products if p.get('Product Type'))))
             product_type_filter = st.multiselect(
                 "Filter by Product Type:",
-                options=sorted(list(set(p['Product Type'] for p in parsed_products if p['Product Type']))),
+                options=types_available,
                 default=[]
             )
         
         # Apply filters
         filtered_df = df.copy()
+        if platform_filter:
+            filtered_df = filtered_df[filtered_df['Platform'].isin(platform_filter)]
         if vendor_filter:
             filtered_df = filtered_df[filtered_df['Vendor'].isin(vendor_filter)]
         if product_type_filter:
@@ -817,7 +748,7 @@ def main():
             st.download_button(
                 label="📄 Download CSV",
                 data=csv_data,
-                file_name=f"shopify_products_{int(time.time())}.csv",
+                file_name=f"ecommerce_products_{int(time.time())}.csv",
                 mime="text/csv"
             )
         elif export_format == "JSON":
@@ -825,7 +756,7 @@ def main():
             st.download_button(
                 label="📄 Download JSON",
                 data=json_data,
-                file_name=f"shopify_products_{int(time.time())}.json",
+                file_name=f"ecommerce_products_{int(time.time())}.json",
                 mime="application/json"
             )
         elif export_format == "Excel":
@@ -834,7 +765,7 @@ def main():
             st.download_button(
                 label="📄 Download Excel (CSV format)",
                 data=csv_data,
-                file_name=f"shopify_products_{int(time.time())}.csv",
+                file_name=f"ecommerce_products_{int(time.time())}.csv",
                 mime="text/csv"
             )
     
@@ -843,7 +774,7 @@ def main():
     st.markdown(
         "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
         "This tool is for educational and research purposes. Always ensure you have permission "
-        "to scrape data from websites."
+        "to scrape data from websites and comply with robots.txt files."
     )
 
 if __name__ == "__main__":
