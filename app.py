@@ -464,6 +464,12 @@ def parse_wordpress_html_data(products):
     return parsed_products
 
 def main():
+    # Initialize session state
+    if 'detected_platform' not in st.session_state:
+        st.session_state.detected_platform = None
+    if 'platform_detected' not in st.session_state:
+        st.session_state.platform_detected = False
+    
     # Header
     st.markdown('<h1 class="main-header">🛍️ E-commerce Product Scraper</h1>', unsafe_allow_html=True)
     st.markdown("Extract product data from Shopify stores and WordPress e-commerce sites")
@@ -485,16 +491,19 @@ def main():
         detect_button = st.button("🔍 Detect Platform", type="secondary")
     
     # Platform detection
-    detected_platform = None
     if detect_button and store_url:
         with st.spinner("Detecting platform..."):
-            detected_platform = detect_platform(store_url)
-            if detected_platform == 'shopify':
-                st.success("✅ Detected: **Shopify Store**")
-            elif detected_platform == 'wordpress':
-                st.success("✅ Detected: **WordPress Site** (likely WooCommerce)")
-            else:
-                st.warning("⚠️ Platform not clearly detected - will attempt multiple methods")
+            st.session_state.detected_platform = detect_platform(store_url)
+            st.session_state.platform_detected = True
+    
+    # Display detection results
+    if st.session_state.platform_detected and st.session_state.detected_platform:
+        if st.session_state.detected_platform == 'shopify':
+            st.success("✅ Detected: **Shopify Store**")
+        elif st.session_state.detected_platform == 'wordpress':
+            st.success("✅ Detected: **WordPress Site** (likely WooCommerce)")
+        else:
+            st.warning("⚠️ Platform not clearly detected - will attempt multiple methods")
     
     # Sidebar for settings
     with st.sidebar:
@@ -522,31 +531,55 @@ def main():
         st.header("📊 Export Options")
         export_format = st.selectbox("Export Format", ["CSV", "JSON", "Excel"])
     
+    # Determine the effective platform for method selection
+    if platform_override == "Auto-detect":
+        effective_platform = st.session_state.detected_platform
+    else:
+        effective_platform = platform_override.lower()
+    
     # Scraping method selection based on platform
-    if detected_platform == 'shopify' or platform_override == "Shopify":
+    scraping_method = None
+    
+    if effective_platform == 'shopify' or platform_override == "Shopify":
         st.subheader("🔧 Shopify Scraping Method")
         scraping_method = st.radio(
             "Choose Shopify scraping approach:",
             ["Standard JSON API", "Paginated JSON API", "Collections-based Scraping", "All Shopify Methods"],
-            help="Different methods to extract Shopify product data"
+            help="Different methods to extract Shopify product data",
+            key="shopify_method"
         )
-    elif detected_platform == 'wordpress' or platform_override == "WordPress":
+    elif effective_platform == 'wordpress' or platform_override == "WordPress":
         st.subheader("🔧 WordPress Scraping Method") 
         scraping_method = st.radio(
             "Choose WordPress scraping approach:",
             ["WooCommerce REST API", "HTML Product Pages", "All WordPress Methods"],
-            help="Different methods to extract WordPress/WooCommerce product data"
+            help="Different methods to extract WordPress/WooCommerce product data",
+            key="wordpress_method"
         )
-    else:
+    elif platform_override == "Try Both":
         st.subheader("🔧 Universal Scraping Method")
         scraping_method = st.radio(
             "Choose scraping approach:",
             ["Try All Platforms", "Shopify Methods Only", "WordPress Methods Only"],
-            help="Try different platform approaches"
+            help="Try different platform approaches",
+            key="universal_method"
+        )
+    else:
+        # Show both options if platform is unknown
+        st.subheader("🔧 Universal Scraping Method")
+        scraping_method = st.radio(
+            "Choose scraping approach:",
+            ["Try All Platforms", "Shopify Methods Only", "WordPress Methods Only"],
+            help="Try different platform approaches",
+            key="unknown_method"
         )
     
-    # Main scrape button
-    scrape_button = st.button("🚀 Start Scraping", type="primary", use_container_width=True)
+    # Main scrape button - only show if URL is provided
+    if store_url:
+        scrape_button = st.button("🚀 Start Scraping", type="primary", use_container_width=True)
+    else:
+        scrape_button = False
+        st.info("👆 Please enter a website URL to start scraping")
 
     # Information section
     with st.expander("ℹ️ How it works", expanded=False):
