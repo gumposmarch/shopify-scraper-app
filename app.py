@@ -753,8 +753,7 @@ def main():
         
         # Parse and display data
         with st.status("Processing product data...", expanded=True) as status:
-            parsed_products = parse_product_data(all_products)
-            df = pd.DataFrame(parsed_products)
+            df = pd.DataFrame(all_products)
             status.update(label="Data processing complete ✅", state="complete")
         
         # Display results
