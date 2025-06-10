@@ -612,9 +612,15 @@ def main():
         collection_info = {}
         scraping_results = {}
         
+    # Scraping logic
+    if scrape_button and store_url:
+        all_products = []
+        collection_info = {}
+        scraping_results = {}
+        
         # Determine platform and methods to use
         if platform_override == "Auto-detect":
-            target_platform = detected_platform or detect_platform(store_url)
+            target_platform = st.session_state.detected_platform or detect_platform(store_url)
         elif platform_override == "Try Both":
             target_platform = "both"
         else:
@@ -623,13 +629,13 @@ def main():
         with st.spinner("Scraping products... Please wait"):
             
             # SHOPIFY SCRAPING
-            if target_platform in ['shopify', 'both'] or 'Shopify' in scraping_method:
+            if target_platform in ['shopify', 'both'] or 'Shopify' in str(scraping_method):
                 with st.status("Validating Shopify store...", expanded=True) as status:
                     if not is_shopify_store(store_url) and target_platform == 'shopify':
                         st.warning("⚠️ This doesn't appear to be a Shopify store.")
                     status.update(label="Shopify validation complete ✅", state="complete")
                 
-                if scraping_method == "Standard JSON API" or "Shopify" in scraping_method:
+                if scraping_method == "Standard JSON API" or "Shopify" in str(scraping_method):
                     with st.status("Shopify: Standard JSON API...", expanded=True) as status:
                         products = get_products_json(store_url, limit=50)
                         if products:
@@ -638,7 +644,7 @@ def main():
                             scraping_results['Shopify Standard'] = len(parsed)
                         status.update(label=f"Shopify Standard: {len(products) if products else 0} products ✅", state="complete")
                         
-                if scraping_method == "Paginated JSON API" or "All" in scraping_method:
+                if scraping_method == "Paginated JSON API" or "All" in str(scraping_method):
                     with st.status("Shopify: Paginated JSON API...", expanded=True) as status:
                         products = get_products_json(store_url, limit=250)
                         if products:
@@ -650,7 +656,7 @@ def main():
                             scraping_results['Shopify Paginated'] = len(parsed)
                         status.update(label=f"Shopify Paginated: {len(products) if products else 0} products ✅", state="complete")
                 
-                if scraping_method == "Collections-based Scraping" or "All" in scraping_method:
+                if scraping_method == "Collections-based Scraping" or "All" in str(scraping_method):
                     with st.status("Shopify: Collections-based scraping...", expanded=True) as status:
                         products, collections = get_collections_and_products(store_url)
                         if products:
@@ -663,13 +669,13 @@ def main():
                         status.update(label=f"Shopify Collections: {len(products) if products else 0} products ✅", state="complete")
             
             # WORDPRESS SCRAPING  
-            if target_platform in ['wordpress', 'both'] or 'WordPress' in scraping_method:
+            if target_platform in ['wordpress', 'both'] or 'WordPress' in str(scraping_method):
                 with st.status("Validating WordPress site...", expanded=True) as status:
                     if not is_wordpress_site(store_url) and target_platform == 'wordpress':
                         st.warning("⚠️ This doesn't appear to be a WordPress site.")
                     status.update(label="WordPress validation complete ✅", state="complete")
                 
-                if scraping_method == "WooCommerce REST API" or "All" in scraping_method:
+                if scraping_method == "WooCommerce REST API" or "All" in str(scraping_method):
                     with st.status("WordPress: WooCommerce REST API...", expanded=True) as status:
                         products, api_status = get_wordpress_products_woocommerce_api(store_url)
                         if products:
@@ -680,7 +686,7 @@ def main():
                         else:
                             status.update(label=f"WordPress API: Failed ({api_status})", state="error")
                 
-                if scraping_method == "HTML Product Pages" or "All" in scraping_method:
+                if scraping_method == "HTML Product Pages" or "All" in str(scraping_method):
                     with st.status("WordPress: HTML scraping...", expanded=True) as status:
                         products = scrape_wordpress_products_html(store_url)
                         if products:
@@ -730,7 +736,29 @@ def main():
             platforms = list(set(p.get('Platform', 'Unknown') for p in all_products))
             st.metric("Platforms Found", len(platforms))
         with col4:
-            prices = [float(str(p.get('Price', 0)).replace('$', '').replace(',', '')) for p in all_products if p.get('Price') and str(p.get('Price', '')).replace('$', '').replace(',', '').replace('.', '').isdigit()]
+            prices = [float(str(p.get('Price', 0)).replace('
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites and comply with robots.txt files."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '')) for p in all_products if p.get('Price') and str(p.get('Price', '')).replace('
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites and comply with robots.txt files."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '').replace('.', '').isdigit()]
             avg_price = sum(prices) / len(prices) if prices else 0
             st.metric("Average Price", f"${avg_price:.2f}")
         
