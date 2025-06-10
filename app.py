@@ -721,7 +721,7 @@ def main():
             cols = st.columns(min(4, len(collection_info)))
             for i, (collection_name, count) in enumerate(collection_info.items()):
                 with cols[i % len(cols)]:
-                    st.metric(collection_name, f"{count} products")_products_json(store_url, limit=50)
+                    st.metric(collection_name, f"{count} products")
                     if products1:
                         all_products.extend(products1)
                     status.update(label=f"Standard API: {len(products1) if products1 else 0} products ✅", state="complete")
