@@ -153,11 +153,124 @@ def get_collections_and_products(store_url):
         st.error(f"Error fetching collections: {str(e)}")
         return [], {}
 
-def parse_product_data(products):
-    """Parse product data into a structured format"""
+def get_detailed_product_info(store_url, product_handle, delay=1.0):
+    """Get detailed product information by scraping the individual product page"""
+    try:
+        if not store_url.startswith(('http://', 'https://')):
+            store_url = 'https://' + store_url
+        
+        base_url = store_url.rstrip('/')
+        product_url = f"{base_url}/products/{product_handle}"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        time.sleep(delay)  # Respect rate limiting
+        response = requests.get(product_url, headers=headers, timeout=15)
+        
+        if response.status_code != 200:
+            return {}
+        
+        soup = BeautifulSoup(response.content, 'html.parser')
+        detailed_info = {}
+        
+        # Look for common tabbed content selectors
+        tab_selectors = [
+            '.product-tabs',
+            '.tab-content', 
+            '.product-details-tabs',
+            '.accordion',
+            '.product-accordion',
+            '.product-info-tabs',
+            '[data-tabs]',
+            '.tabs-wrapper'
+        ]
+        
+        # Extract tabbed content
+        for selector in tab_selectors:
+            tabs = soup.select(selector)
+            if tabs:
+                for tab_container in tabs:
+                    # Look for tab headers and content
+                    tab_headers = tab_container.select('.tab-header, .tab-title, .accordion-header, h3, h4, [data-tab-title]')
+                    tab_contents = tab_container.select('.tab-content, .tab-pane, .accordion-content, .tab-panel')
+                    
+                    # If we have both headers and content, pair them
+                    if tab_headers and tab_contents:
+                        for i, (header, content) in enumerate(zip(tab_headers, tab_contents)):
+                            header_text = header.get_text(strip=True)
+                            content_text = content.get_text(strip=True)
+                            if header_text and content_text:
+                                detailed_info[f'Tab_{header_text}'] = content_text
+                    
+                    # If no clear pairing, extract all content
+                    elif tab_contents:
+                        for i, content in enumerate(tab_contents):
+                            content_text = content.get_text(strip=True)
+                            if content_text:
+                                detailed_info[f'Tab_Content_{i+1}'] = content_text
+        
+        # Look for specific common sections
+        common_sections = {
+            'Specifications': ['.specifications', '.product-specs', '.spec-table', '.features-list'],
+            'Ingredients': ['.ingredients', '.ingredient-list', '.composition'],
+            'Care_Instructions': ['.care-instructions', '.washing-instructions', '.care-guide'],
+            'Shipping_Info': ['.shipping-info', '.delivery-info', '.shipping-details'],
+            'Size_Guide': ['.size-guide', '.size-chart', '.sizing-info'],
+            'Additional_Info': ['.additional-info', '.extra-details', '.more-info']
+        }
+        
+        for section_name, selectors in common_sections.items():
+            for selector in selectors:
+                elements = soup.select(selector)
+                if elements:
+                    content = ' '.join([elem.get_text(strip=True) for elem in elements])
+                    if content:
+                        detailed_info[section_name] = content
+                    break
+        
+        # Look for any accordion content
+        accordions = soup.select('.accordion-item, .collapsible, [data-accordion]')
+        for i, accordion in enumerate(accordions):
+            header = accordion.select_one('.accordion-header, .collapsible-header, h3, h4')
+            content = accordion.select_one('.accordion-content, .collapsible-content, .accordion-body')
+            
+            if header and content:
+                header_text = header.get_text(strip=True)
+                content_text = content.get_text(strip=True)
+                if header_text and content_text:
+                    detailed_info[f'Accordion_{header_text}'] = content_text
+        
+        # Extract product details from structured data (JSON-LD)
+        json_scripts = soup.find_all('script', type='application/ld+json')
+        for script in json_scripts:
+            try:
+                data = json.loads(script.string)
+                if isinstance(data, dict) and data.get('@type') == 'Product':
+                    # Extract additional product properties
+                    if 'brand' in data:
+                        detailed_info['Brand_JsonLD'] = data['brand'].get('name', '') if isinstance(data['brand'], dict) else str(data['brand'])
+                    if 'additionalProperty' in data:
+                        for prop in data['additionalProperty']:
+                            if isinstance(prop, dict):
+                                name = prop.get('name', '')
+                                value = prop.get('value', '')
+                                if name and value:
+                                    detailed_info[f'Property_{name}'] = value
+            except:
+                continue
+        
+        return detailed_info
+    
+    except Exception as e:
+        return {'Error': f'Failed to fetch detailed info: {str(e)}'}
+
+def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
+    """Parse product data into a structured format with optional detailed scraping"""
     parsed_products = []
     
-    for product in products:
+    for i, product in enumerate(products):
         # Get first variant for pricing (most Shopify stores have at least one variant)
         first_variant = product.get('variants', [{}])[0]
         
@@ -204,6 +317,17 @@ def parse_product_data(products):
             'Description': BeautifulSoup(product.get('body_html', ''), 'html.parser').get_text().strip() if product.get('body_html') else ''
         }
         
+        # Fetch detailed information if requested
+        if fetch_detailed and product.get('handle') and store_url:
+            if (i + 1) % 5 == 0:  # Progress update every 5 products
+                st.write(f"Fetching detailed info for product {i + 1}/{len(products)}...")
+            
+            detailed_info = get_detailed_product_info(store_url, product.get('handle'), delay)
+            
+            # Add detailed information to the product data
+            for key, value in detailed_info.items():
+                parsed_product[f'Detail_{key}'] = value
+        
         parsed_products.append(parsed_product)
     
     return parsed_products
@@ -216,6 +340,27 @@ def main():
     # Sidebar for settings
     with st.sidebar:
         st.header("⚙️ Settings")
+        
+        # Detailed scraping option
+        st.subheader("📄 Detailed Scraping")
+        fetch_detailed = st.checkbox(
+            "Fetch detailed product information",
+            help="Scrape individual product pages for tabbed content, specifications, etc. (slower)",
+            value=False
+        )
+        
+        if fetch_detailed:
+            st.warning("⚠️ This will be significantly slower as it visits each product page individually")
+            detailed_delay = st.slider(
+                "Delay between detailed requests (seconds)", 
+                min_value=1.0, 
+                max_value=10.0, 
+                value=2.0, 
+                step=0.5,
+                help="Higher delay is more respectful but slower"
+            )
+        else:
+            detailed_delay = 1.0
         
         # Rate limiting
         delay_between_requests = st.slider(
@@ -270,6 +415,13 @@ def main():
         - Product images and variants
         - Tags, vendor information, and more
         - Collection information (when available)
+        - **Optional: Detailed tabbed content** (specifications, care instructions, etc.)
+        
+        **Detailed Scraping (when enabled):**
+        - Visits individual product pages to extract tabbed content
+        - Gets specifications, ingredients, care instructions
+        - Extracts accordion content and additional product details
+        - Significantly slower but provides comprehensive data
         
         **Note:** Different methods may return different amounts of data. Some stores restrict access to certain endpoints.
         """)
@@ -344,7 +496,7 @@ def main():
         
         # Parse and display data
         with st.status("Processing product data...", expanded=True) as status:
-            parsed_products = parse_product_data(all_products)
+            parsed_products = parse_product_data(all_products, fetch_detailed, store_url, detailed_delay)
             df = pd.DataFrame(parsed_products)
             status.update(label="Data processing complete ✅", state="complete")
         
