@@ -201,7 +201,7 @@ def parse_product_data(products):
             'Variants Count': len(product.get('variants', [])),
             'Images Count': len(product.get('images', [])),
             'Variant Images': json.dumps(variant_images) if variant_images else '',  # JSON string of variant-specific images
-            'Description': BeautifulSoup(product.get('body_html', ''), 'html.parser').get_text()[:200] + '...' if product.get('body_html') else ''
+            'Description': BeautifulSoup(product.get('body_html', ''), 'html.parser').get_text().strip() if product.get('body_html') else ''
         }
         
         parsed_products.append(parsed_product)
@@ -399,8 +399,28 @@ def main():
         if product_type_filter:
             filtered_df = filtered_df[filtered_df['Product Type'].isin(product_type_filter)]
         
-        # Display filtered data with image preview
-        st.dataframe(filtered_df, use_container_width=True)
+        # Display filtered data with improved column settings
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Description": st.column_config.TextColumn(
+                    "Description",
+                    help="Full product description",
+                    max_chars=None,  # No character limit
+                    width="large"
+                ),
+                "All Images": st.column_config.TextColumn(
+                    "All Images", 
+                    help="All product image URLs separated by |",
+                    width="medium"
+                ),
+                "Image URL": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
         
         # Image gallery section
         if len(filtered_df) > 0:
