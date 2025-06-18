@@ -300,8 +300,8 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
     parsed_products = []
     
     for i, product in enumerate(products):
-        # Get first variant for pricing (most Shopify stores have at least one variant)
-        first_variant = product.get('variants', [{}])[0]
+        # Get all variants for this product
+        variants = product.get('variants', [{}])
         
         # Get all images
         images = product.get('images', [])
@@ -315,7 +315,7 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
         variant_images = []
         variant_image_details = []
         
-        for variant in product.get('variants', []):
+        for variant in variants:
             variant_image_id = variant.get('image_id')
             if variant_image_id:
                 # Find the image that matches this variant
@@ -343,29 +343,80 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
                 display_text += f" (SKU: {var_info['variant_sku']})"
             variant_display.append(display_text)
         
+        # Get collection info - check multiple possible sources
+        collection_name = ''
+        if 'collection' in product:
+            collection_name = product['collection']
+        elif 'collections' in product and product['collections']:
+            # If there are multiple collections, take the first one
+            if isinstance(product['collections'], list):
+                collection_name = product['collections'][0] if product['collections'] else ''
+            else:
+                collection_name = str(product['collections'])
+        elif 'product_type' in product and product['product_type']:
+            # Fallback to product type if no collection found
+            collection_name = f"Type: {product['product_type']}"
+        
+        # Use first variant for main product data
+        first_variant = variants[0] if variants else {}
+        
+        # Create main product record
         parsed_product = {
-            'Title': product.get('title', ''),
+            # Shopify CSV compatible fields
             'Handle': product.get('handle', ''),
-            'Product Type': product.get('product_type', ''),
+            'Title': product.get('title', ''),
+            'Body (HTML)': product.get('body_html', ''),
             'Vendor': product.get('vendor', ''),
-            'Collection': product.get('collection', ''),  # Add collection info
-            'Price': first_variant.get('price', '0'),
-            'Compare At Price': first_variant.get('compare_at_price', ''),
-            'Available': first_variant.get('available', False),
-            'Inventory Quantity': first_variant.get('inventory_quantity', 0),
-            'Weight': first_variant.get('weight', 0),
+            'Product Category': collection_name,  # Map collection to Product Category
+            'Type': product.get('product_type', ''),
             'Tags': ', '.join(product.get('tags', [])),
+            'Published': 'TRUE' if product.get('published_at') else 'FALSE',
+            
+            # Variant information (first variant)
+            'Variant SKU': first_variant.get('sku', ''),
+            'Variant Grams': first_variant.get('grams', 0),
+            'Variant Inventory Qty': first_variant.get('inventory_quantity', 0),
+            'Variant Price': first_variant.get('price', '0'),
+            'Variant Compare At Price': first_variant.get('compare_at_price', ''),
+            'Variant Requires Shipping': 'TRUE' if first_variant.get('requires_shipping', True) else 'FALSE',
+            'Variant Taxable': 'TRUE' if first_variant.get('taxable', True) else 'FALSE',
+            'Variant Weight Unit': first_variant.get('weight_unit', 'kg'),
+            
+            # Image information
+            'Image Src': first_image,
+            'Image Position': 1,
+            
+            # Additional custom fields for analysis
+            'Collection': collection_name,  # Keep this for filtering
+            'Available': first_variant.get('available', False),
             'Created At': product.get('created_at', ''),
             'Updated At': product.get('updated_at', ''),
-            'Published At': product.get('published_at', ''),
             'Main Image': first_image,
             'Additional Images': ' | '.join(additional_images) if additional_images else '',
             'Variant Images': ' | '.join(variant_images) if variant_images else '',
             'Variant Details': ' | '.join(variant_display) if variant_display else '',
             'Total Images': len(all_image_urls),
-            'Variants Count': len(product.get('variants', [])),
+            'Variants Count': len(variants),
+            'All Variants': json.dumps([{
+                'title': v.get('title', ''),
+                'sku': v.get('sku', ''),
+                'price': v.get('price', ''),
+                'available': v.get('available', False),
+                'inventory_quantity': v.get('inventory_quantity', 0)
+            } for v in variants]) if len(variants) > 1 else '',
             'Description': clean_text_for_dataframe(BeautifulSoup(product.get('body_html', ''), 'html.parser').get_text().strip()) if product.get('body_html') else ''
         }
+        
+        # Add variant option information if available
+        if first_variant.get('option1'):
+            parsed_product['Option1 Name'] = 'Title'  # Default option name
+            parsed_product['Option1 Value'] = first_variant.get('option1', '')
+        if first_variant.get('option2'):
+            parsed_product['Option2 Name'] = 'Option2'
+            parsed_product['Option2 Value'] = first_variant.get('option2', '')
+        if first_variant.get('option3'):
+            parsed_product['Option3 Name'] = 'Option3'
+            parsed_product['Option3 Value'] = first_variant.get('option3', '')
         
         # Fetch detailed information if requested
         if fetch_detailed and product.get('handle') and store_url:
