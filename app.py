@@ -153,6 +153,29 @@ def get_collections_and_products(store_url):
         st.error(f"Error fetching collections: {str(e)}")
         return [], {}
 
+def clean_text_for_dataframe(text):
+    """Clean text to prevent Unicode encoding errors in dataframes"""
+    if not text:
+        return ""
+    
+    # Convert to string if not already
+    text = str(text)
+    
+    # Remove or replace problematic Unicode characters
+    text = text.encode('utf-8', errors='ignore').decode('utf-8')
+    
+    # Remove control characters
+    text = ''.join(char for char in text if ord(char) >= 32 or char in '\n\r\t')
+    
+    # Normalize whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    # Limit length to prevent huge cells
+    if len(text) > 2000:
+        text = text[:2000] + "..."
+    
+    return text
+
 def get_detailed_product_info(store_url, product_handle, delay=1.0):
     """Get detailed product information by scraping the individual product page"""
     try:
@@ -173,7 +196,7 @@ def get_detailed_product_info(store_url, product_handle, delay=1.0):
             return {'Debug_Error': f'HTTP {response.status_code} for {product_url}'}
         
         soup = BeautifulSoup(response.content, 'html.parser')
-        detailed_info = {'Debug_URL': product_url}  # Always include URL for debugging
+        detailed_info = {'Debug_URL': clean_text_for_dataframe(product_url)}  # Always include URL for debugging
         
         # Debug: Check if we can find any product-tabs at all
         product_tabs_container = soup.select_one('.product-tabs')
@@ -182,7 +205,7 @@ def get_detailed_product_info(store_url, product_handle, delay=1.0):
             
             # Look for individual product-tab elements
             product_tabs = soup.select('.product-tabs .product-tab')
-            detailed_info['Debug_Tab_Count'] = len(product_tabs)
+            detailed_info['Debug_Tab_Count'] = str(len(product_tabs))
             
             if product_tabs:
                 for i, tab in enumerate(product_tabs):
@@ -201,14 +224,12 @@ def get_detailed_product_info(store_url, product_handle, delay=1.0):
                         content_elem = tab.select_one('.product-tab__content')
                     
                     if title_elem:
-                        title = title_elem.get_text(strip=True)
-                        title = re.sub(r'\s+', ' ', title).strip()
+                        title = clean_text_for_dataframe(title_elem.get_text(strip=True))
                         detailed_info[f'Debug_Tab_{i}_Title'] = title
                         
                         if content_elem:
-                            content = content_elem.get_text(strip=True)
-                            content = re.sub(r'\s+', ' ', content).strip()
-                            detailed_info[f'Debug_Tab_{i}_Content_Length'] = len(content)
+                            content = clean_text_for_dataframe(content_elem.get_text(strip=True))
+                            detailed_info[f'Debug_Tab_{i}_Content_Length'] = str(len(content))
                             
                             if title and content and len(content) > 5:
                                 # Clean title for column name
@@ -229,19 +250,17 @@ def get_detailed_product_info(store_url, product_handle, delay=1.0):
         
         # Try a broader approach - look for any collapsible content
         collapsible_triggers = soup.select('[data-collapsible-trigger]')
-        detailed_info['Debug_Collapsible_Count'] = len(collapsible_triggers)
+        detailed_info['Debug_Collapsible_Count'] = str(len(collapsible_triggers))
         
         for i, trigger in enumerate(collapsible_triggers):
-            title = trigger.get_text(strip=True)
-            title = re.sub(r'\s+', ' ', title).strip()
+            title = clean_text_for_dataframe(trigger.get_text(strip=True))
             
             # Find corresponding content using aria-controls
             aria_controls = trigger.get('aria-controls')
             if aria_controls:
                 content_elem = soup.find(id=aria_controls)
                 if content_elem:
-                    content = content_elem.get_text(strip=True)
-                    content = re.sub(r'\s+', ' ', content).strip()
+                    content = clean_text_for_dataframe(content_elem.get_text(strip=True))
                     
                     if title and content and len(content) > 10:
                         clean_title = re.sub(r'[^a-zA-Z0-9\s]', '', title).strip().replace(' ', '_')
@@ -249,23 +268,32 @@ def get_detailed_product_info(store_url, product_handle, delay=1.0):
         
         # Look for any elements with common tab-related classes
         tab_elements = soup.select('.tab, .accordion-item, .collapsible, .product-tab')
-        detailed_info['Debug_Total_Tab_Elements'] = len(tab_elements)
+        detailed_info['Debug_Total_Tab_Elements'] = str(len(tab_elements))
         
         # Try to extract any visible text from common content areas
         content_areas = soup.select('.rte, .product-description, .tab-content, .tab-pane')
         for i, area in enumerate(content_areas):
-            content = area.get_text(strip=True)
+            content = clean_text_for_dataframe(area.get_text(strip=True))
             if content and len(content) > 50:  # Only substantial content
                 detailed_info[f'Content_Area_{i+1}'] = content[:500] + '...' if len(content) > 500 else content
         
         # Add some page structure info for debugging
-        detailed_info['Debug_Page_Title'] = soup.find('title').get_text(strip=True) if soup.find('title') else 'No title'
+        page_title = soup.find('title')
+        detailed_info['Debug_Page_Title'] = clean_text_for_dataframe(page_title.get_text(strip=True) if page_title else 'No title')
         detailed_info['Debug_Has_Product_Form'] = 'Yes' if soup.select_one('form[action*="cart"]') else 'No'
         
-        return detailed_info
+        # Clean all values to ensure they're safe for dataframe
+        cleaned_info = {}
+        for key, value in detailed_info.items():
+            cleaned_key = clean_text_for_dataframe(str(key))
+            cleaned_value = clean_text_for_dataframe(str(value))
+            if cleaned_key and cleaned_value:
+                cleaned_info[cleaned_key] = cleaned_value
+        
+        return cleaned_info
     
     except Exception as e:
-        return {'Debug_Exception': f'Error: {str(e)}'}
+        return {'Debug_Exception': f'Error: {clean_text_for_dataframe(str(e))}'}
 
 def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
     """Parse product data into a structured format with optional detailed scraping"""
@@ -315,7 +343,7 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
             'Variants Count': len(product.get('variants', [])),
             'Images Count': len(product.get('images', [])),
             'Variant Images': json.dumps(variant_images) if variant_images else '',  # JSON string of variant-specific images
-            'Description': BeautifulSoup(product.get('body_html', ''), 'html.parser').get_text().strip() if product.get('body_html') else ''
+            'Description': clean_text_for_dataframe(BeautifulSoup(product.get('body_html', ''), 'html.parser').get_text().strip()) if product.get('body_html') else ''
         }
         
         # Fetch detailed information if requested
@@ -325,9 +353,12 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
             
             detailed_info = get_detailed_product_info(store_url, product.get('handle'), delay)
             
-            # Add detailed information to the product data
+            # Add detailed information to the product data with proper text cleaning
             for key, value in detailed_info.items():
-                parsed_product[f'Detail_{key}'] = value
+                clean_key = clean_text_for_dataframe(str(key))
+                clean_value = clean_text_for_dataframe(str(value))
+                if clean_key and clean_value:
+                    parsed_product[f'Detail_{clean_key}'] = clean_value
         
         parsed_products.append(parsed_product)
     
