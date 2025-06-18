@@ -660,10 +660,16 @@ def main():
             filtered_df, 
             use_container_width=True,
             column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    max_chars=None,
+                    width="large"
+                ),
                 "Description": st.column_config.TextColumn(
-                    "Description",
-                    help="Full product description",
-                    max_chars=None,  # No character limit
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    max_chars=None,
                     width="large"
                 ),
                 "Additional Images": st.column_config.TextColumn(
@@ -671,9 +677,13 @@ def main():
                     help="Additional product image URLs (excluding main image)",
                     width="medium"
                 ),
-                "Main Image": st.column_config.ImageColumn(
+                "Image Src": st.column_config.ImageColumn(
                     "Main Image",
                     help="Primary product image"
+                ),
+                "Main Image": st.column_config.ImageColumn(
+                    "Main Image Preview",
+                    help="Primary product image preview"
                 ),
                 "Variant Images": st.column_config.TextColumn(
                     "Variant Images",
@@ -684,6 +694,11 @@ def main():
                     "Variant Details", 
                     help="Variant names with their corresponding image URLs",
                     width="large"
+                ),
+                "All Variants": st.column_config.TextColumn(
+                    "All Variants",
+                    help="JSON data of all product variants",
+                    width="medium"
                 )
             }
         )
@@ -702,10 +717,10 @@ def main():
             
             if selected_product:
                 product_row = filtered_df[filtered_df['Title'] == selected_product].iloc[0]
-                main_image = product_row['Main Image']
-                additional_images = product_row['Additional Images']
-                variant_images = product_row['Variant Images']
-                variant_details = product_row['Variant Details']
+                main_image = product_row.get('Main Image', '') or product_row.get('Image Src', '')
+                additional_images = product_row.get('Additional Images', '')
+                variant_images = product_row.get('Variant Images', '')
+                variant_details = product_row.get('Variant Details', '')
                 
                 # Display main image
                 if main_image:
