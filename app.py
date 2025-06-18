@@ -348,6 +348,7 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
             'Handle': product.get('handle', ''),
             'Product Type': product.get('product_type', ''),
             'Vendor': product.get('vendor', ''),
+            'Collection': product.get('collection', ''),  # Add collection info
             'Price': first_variant.get('price', '0'),
             'Compare At Price': first_variant.get('compare_at_price', ''),
             'Available': first_variant.get('available', False),
