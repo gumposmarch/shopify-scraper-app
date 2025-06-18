@@ -175,7 +175,28 @@ def get_detailed_product_info(store_url, product_handle, delay=1.0):
         soup = BeautifulSoup(response.content, 'html.parser')
         detailed_info = {}
         
-        # Look for common tabbed content selectors
+        # Look for the specific structure from your example
+        product_tabs = soup.select('.product-tabs .product-tab')
+        if product_tabs:
+            for tab in product_tabs:
+                # Get tab title
+                title_elem = tab.select_one('.product-tab__title, button[data-collapsible-trigger]')
+                content_elem = tab.select_one('.product-tab__content .product-tab__inner, .product-tab__inner')
+                
+                if title_elem and content_elem:
+                    # Clean the title text
+                    title = title_elem.get_text(strip=True)
+                    # Remove any SVG icons or extra whitespace
+                    title = re.sub(r'\s+', ' ', title).strip()
+                    
+                    # Get content text
+                    content = content_elem.get_text(strip=True)
+                    content = re.sub(r'\s+', ' ', content).strip()
+                    
+                    if title and content and len(content) > 10:  # Only add substantial content
+                        detailed_info[f'Tab_{title}'] = content
+        
+        # Look for other common tabbed content selectors
         tab_selectors = [
             '.product-tabs',
             '.tab-content', 
@@ -184,62 +205,91 @@ def get_detailed_product_info(store_url, product_handle, delay=1.0):
             '.product-accordion',
             '.product-info-tabs',
             '[data-tabs]',
-            '.tabs-wrapper'
+            '.tabs-wrapper',
+            '.collapsible',
+            '[data-collapsible-trigger]'
         ]
         
-        # Extract tabbed content
+        # Extract tabbed content with various structures
         for selector in tab_selectors:
-            tabs = soup.select(selector)
-            if tabs:
-                for tab_container in tabs:
-                    # Look for tab headers and content
-                    tab_headers = tab_container.select('.tab-header, .tab-title, .accordion-header, h3, h4, [data-tab-title]')
-                    tab_contents = tab_container.select('.tab-content, .tab-pane, .accordion-content, .tab-panel')
+            containers = soup.select(selector)
+            if containers:
+                for container in containers:
+                    # Look for collapsible/accordion pattern (like your example)
+                    collapsible_items = container.select('[data-collapsible-trigger]')
+                    for item in collapsible_items:
+                        # Get the trigger (title) element
+                        title_text = item.get_text(strip=True)
+                        title_text = re.sub(r'\s+', ' ', title_text).strip()
+                        
+                        # Find the corresponding content
+                        aria_controls = item.get('aria-controls')
+                        if aria_controls:
+                            content_elem = soup.find(id=aria_controls)
+                            if content_elem:
+                                content_text = content_elem.get_text(strip=True)
+                                content_text = re.sub(r'\s+', ' ', content_text).strip()
+                                
+                                if title_text and content_text and len(content_text) > 10:
+                                    detailed_info[f'Section_{title_text}'] = content_text
+                    
+                    # Look for traditional tab headers and content
+                    tab_headers = container.select('.tab-header, .tab-title, .accordion-header, h3, h4, [data-tab-title]')
+                    tab_contents = container.select('.tab-content, .tab-pane, .accordion-content, .tab-panel, .rte')
                     
                     # If we have both headers and content, pair them
                     if tab_headers and tab_contents:
-                        for i, (header, content) in enumerate(zip(tab_headers, tab_contents)):
+                        for header, content in zip(tab_headers, tab_contents):
                             header_text = header.get_text(strip=True)
                             content_text = content.get_text(strip=True)
-                            if header_text and content_text:
-                                detailed_info[f'Tab_{header_text}'] = content_text
-                    
-                    # If no clear pairing, extract all content
-                    elif tab_contents:
-                        for i, content in enumerate(tab_contents):
-                            content_text = content.get_text(strip=True)
-                            if content_text:
-                                detailed_info[f'Tab_Content_{i+1}'] = content_text
+                            header_text = re.sub(r'\s+', ' ', header_text).strip()
+                            content_text = re.sub(r'\s+', ' ', content_text).strip()
+                            
+                            if header_text and content_text and len(content_text) > 10:
+                                detailed_info[f'Content_{header_text}'] = content_text
         
-        # Look for specific common sections
+        # Look for specific common sections with more targeted selectors
         common_sections = {
-            'Specifications': ['.specifications', '.product-specs', '.spec-table', '.features-list'],
-            'Ingredients': ['.ingredients', '.ingredient-list', '.composition'],
-            'Care_Instructions': ['.care-instructions', '.washing-instructions', '.care-guide'],
-            'Shipping_Info': ['.shipping-info', '.delivery-info', '.shipping-details'],
-            'Size_Guide': ['.size-guide', '.size-chart', '.sizing-info'],
-            'Additional_Info': ['.additional-info', '.extra-details', '.more-info']
+            'Specifications': ['.specifications', '.product-specs', '.spec-table', '.features-list', '[id*="spec"]'],
+            'Ingredients': ['.ingredients', '.ingredient-list', '.composition', '[id*="ingredient"]'],
+            'Care_Instructions': ['.care-instructions', '.washing-instructions', '.care-guide', '[id*="wash"]', '[id*="care"]'],
+            'Shipping_Info': ['.shipping-info', '.delivery-info', '.shipping-details', '[id*="shipping"]'],
+            'Size_Guide': ['.size-guide', '.size-chart', '.sizing-info', '[id*="siz"]'],
+            'Additional_Info': ['.additional-info', '.extra-details', '.more-info', '[id*="additional"]'],
+            'Key_Features': ['.key-features', '.features', '[id*="feature"]', '.metafield-rich_text_field'],
+            'Product_Description': ['.product-description', '[id*="description"]'],
+            'Promise_Warranty': ['.promise', '.warranty', '[id*="promise"]', '[id*="warranty"]']
         }
         
         for section_name, selectors in common_sections.items():
             for selector in selectors:
                 elements = soup.select(selector)
                 if elements:
-                    content = ' '.join([elem.get_text(strip=True) for elem in elements])
-                    if content:
-                        detailed_info[section_name] = content
+                    content_parts = []
+                    for elem in elements:
+                        text = elem.get_text(strip=True)
+                        text = re.sub(r'\s+', ' ', text).strip()
+                        if text and len(text) > 10:
+                            content_parts.append(text)
+                    
+                    if content_parts:
+                        detailed_info[section_name] = ' | '.join(content_parts)
                     break
         
-        # Look for any accordion content
-        accordions = soup.select('.accordion-item, .collapsible, [data-accordion]')
+        # Look for any remaining accordion/collapsible content
+        accordions = soup.select('.accordion-item, .collapsible, [data-accordion], [data-collapsible-container]')
         for i, accordion in enumerate(accordions):
-            header = accordion.select_one('.accordion-header, .collapsible-header, h3, h4')
-            content = accordion.select_one('.accordion-content, .collapsible-content, .accordion-body')
+            # Try multiple header selectors
+            header = accordion.select_one('.accordion-header, .collapsible-header, h3, h4, button, .title')
+            content = accordion.select_one('.accordion-content, .collapsible-content, .accordion-body, .content, .rte')
             
             if header and content:
                 header_text = header.get_text(strip=True)
                 content_text = content.get_text(strip=True)
-                if header_text and content_text:
+                header_text = re.sub(r'\s+', ' ', header_text).strip()
+                content_text = re.sub(r'\s+', ' ', content_text).strip()
+                
+                if header_text and content_text and len(content_text) > 10:
                     detailed_info[f'Accordion_{header_text}'] = content_text
         
         # Extract product details from structured data (JSON-LD)
@@ -260,6 +310,9 @@ def get_detailed_product_info(store_url, product_handle, delay=1.0):
                                     detailed_info[f'Property_{name}'] = value
             except:
                 continue
+        
+        # Clean up any empty or very short entries
+        detailed_info = {k: v for k, v in detailed_info.items() if v and len(str(v).strip()) > 10}
         
         return detailed_info
     
