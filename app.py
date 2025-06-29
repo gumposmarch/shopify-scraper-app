@@ -209,10 +209,39 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
                 'image_id': None
             }]
         
-        # Get collection info
+        # Get collection info - FIXED: Use proper Shopify categories
         collection_name = product.get('collection', '')
-        if not collection_name and product.get('product_type'):
-            collection_name = f"Type: {product['product_type']}"
+        product_category = ""
+        
+        # Map product types to valid Shopify categories
+        product_type = product.get('product_type', '').lower()
+        type_to_category_map = {
+            'rashguard': 'Apparel & Accessories > Clothing > Activewear',
+            'swimwear': 'Apparel & Accessories > Clothing > Swimwear',
+            'clothing': 'Apparel & Accessories > Clothing',
+            'shirt': 'Apparel & Accessories > Clothing > Shirts & Tops',
+            'shorts': 'Apparel & Accessories > Clothing > Shorts',
+            'pants': 'Apparel & Accessories > Clothing > Pants',
+            'dress': 'Apparel & Accessories > Clothing > Dresses',
+            'shoes': 'Apparel & Accessories > Shoes',
+            'accessories': 'Apparel & Accessories',
+            'jewelry': 'Apparel & Accessories > Jewelry',
+            'bags': 'Apparel & Accessories > Handbags, Wallets & Cases',
+            'electronics': 'Electronics',
+            'home': 'Home & Garden',
+            'beauty': 'Health & Beauty',
+            'sports': 'Sporting Goods'
+        }
+        
+        # Try to match product type to category
+        for key, category in type_to_category_map.items():
+            if key in product_type:
+                product_category = category
+                break
+        
+        # If no match found, use generic category
+        if not product_category and product_type:
+            product_category = 'Apparel & Accessories'  # Default safe category
         
         # Create image mapping
         image_mapping = {}
@@ -229,7 +258,7 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
             'Title': product.get('title', ''),
             'Body (HTML)': clean_text_for_dataframe(product.get('body_html', '')),
             'Vendor': product.get('vendor', ''),
-            'Product Category': collection_name,
+            'Product Category': product_category,  # FIXED: Use mapped category
             'Type': product.get('product_type', ''),
             'Tags': ', '.join(product.get('tags', [])),
             'Published': 'TRUE' if product.get('published_at') else 'FALSE',
@@ -242,8 +271,22 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
         # Get main product image
         main_image = images[0].get('src', '') if images else ''
         
-        # Determine option structure based on variants
-        has_real_options = any(v.get('option1') and v.get('option1') != 'Default Title' for v in variants)
+        # FIXED: Better variant option detection
+        has_meaningful_variants = False
+        unique_options = set()
+        
+        for variant in variants:
+            option1 = variant.get('option1', '')
+            option2 = variant.get('option2', '')
+            option3 = variant.get('option3', '')
+            
+            # Check if this variant has meaningful options (not just "Default Title")
+            if (option1 and option1 != 'Default Title') or (option2 and option2 != 'Default Title') or (option3 and option3 != 'Default Title'):
+                has_meaningful_variants = True
+                unique_options.add((option1, option2, option3))
+        
+        # Only consider it multi-variant if there are actually different option combinations
+        has_meaningful_variants = has_meaningful_variants and len(unique_options) > 1
         
         # Process each variant
         for variant_index, variant in enumerate(variants):
@@ -256,20 +299,23 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
             if variant_image_id and variant_image_id in image_mapping:
                 variant_image_url = image_mapping[variant_image_id]['src']
             
-            # FIXED: Proper option handling for Shopify CSV format
-            if has_real_options:
-                # Product has real variants with options
+            # FIXED: Proper option handling based on meaningful variants
+            if has_meaningful_variants:
+                # Product has real variants with meaningful options
+                option1 = variant.get('option1', '')
+                option2 = variant.get('option2', '')
+                option3 = variant.get('option3', '')
+                
                 variant_row.update({
-                    'Option1 Name': 'Title',  # Standard Shopify option name
-                    'Option1 Value': variant.get('option1', ''),
-                    'Option2 Name': 'Color' if variant.get('option2') else '',
-                    'Option2 Value': variant.get('option2', ''),
-                    'Option3 Name': 'Size' if variant.get('option3') else '',
-                    'Option3 Value': variant.get('option3', ''),
+                    'Option1 Name': 'Title' if option1 and option1 != 'Default Title' else '',
+                    'Option1 Value': option1 if option1 != 'Default Title' else '',
+                    'Option2 Name': 'Color' if option2 and option2 != 'Default Title' else '',
+                    'Option2 Value': option2 if option2 != 'Default Title' else '',
+                    'Option3 Name': 'Size' if option3 and option3 != 'Default Title' else '',
+                    'Option3 Value': option3 if option3 != 'Default Title' else '',
                 })
             else:
-                # Product has no real variants (single variant product)
-                # CRITICAL: For single-variant products, leave ALL option fields empty
+                # Single variant product - CRITICAL: ALL option fields MUST be empty
                 variant_row.update({
                     'Option1 Name': '',
                     'Option1 Value': '',
