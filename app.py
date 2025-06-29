@@ -353,6 +353,16 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
     return parsed_products
 
 def main():
+    # Initialize session state
+    if 'scraped_data' not in st.session_state:
+        st.session_state.scraped_data = []
+    if 'collection_info' not in st.session_state:
+        st.session_state.collection_info = {}
+    if 'last_scraped_url' not in st.session_state:
+        st.session_state.last_scraped_url = ""
+    if 'scraping_completed' not in st.session_state:
+        st.session_state.scraping_completed = False
+
     # Header
     st.markdown('<h1 class="main-header">🛍️ Shopify Product Scraper</h1>', unsafe_allow_html=True)
     st.markdown("Extract product data from Shopify stores using their products.json endpoint")
@@ -374,6 +384,17 @@ def main():
         # Export options
         st.header("📊 Export Options")
         export_format = st.selectbox("Export Format", ["CSV", "JSON", "Excel"])
+        
+        # Show current session status
+        if st.session_state.scraping_completed:
+            st.success(f"✅ Data loaded: {len(st.session_state.scraped_data)} rows")
+            st.info(f"🔗 Last scraped: {st.session_state.last_scraped_url}")
+            if st.button("🗑️ Clear Data"):
+                st.session_state.scraped_data = []
+                st.session_state.collection_info = {}
+                st.session_state.last_scraped_url = ""
+                st.session_state.scraping_completed = False
+                st.rerun()
     
     # Main input section
     col1, col2 = st.columns([3, 1])
@@ -438,6 +459,9 @@ def main():
     
     # Scraping logic
     if scrape_button and store_url:
+        # Store the URL being scraped
+        st.session_state.last_scraped_url = store_url
+        
         all_products = []
         collection_info = {}
         
@@ -512,8 +536,24 @@ def main():
                 st.warning("No products found. The store might be empty or have restricted access.")
                 st.stop()
         
+        # Store results in session state
+        st.session_state.scraped_data = all_products
+        st.session_state.collection_info = collection_info
+        st.session_state.scraping_completed = True
+        
         # Display results
         st.success(f"✅ Successfully scraped {len(all_products)} products!")
+        st.rerun()  # Refresh to show the data section
+    
+    # Display data section if we have scraped data
+    if st.session_state.scraping_completed and st.session_state.scraped_data:
+        
+    # Display data section if we have scraped data
+    if st.session_state.scraping_completed and st.session_state.scraped_data:
+        all_products = st.session_state.scraped_data
+        collection_info = st.session_state.collection_info
+        
+        st.success(f"✅ Data loaded: {len(all_products)} products from {st.session_state.last_scraped_url}")
         
         # Show collection information if available
         if collection_info:
@@ -537,7 +577,1714 @@ def main():
             unique_vendors = len(set(p.get('Vendor', '') for p in all_products if p.get('Vendor')))
             st.metric("Unique Vendors", unique_vendors)
         with col4:
-            prices = [float(str(p.get('Variant Price', 0)).replace('$', '').replace(',', '')) for p in all_products if p.get('Variant Price') and str(p.get('Variant Price', '')).replace('$', '').replace(',', '').replace('.', '').isdigit()]
+            prices = [float(str(p.get('Variant Price', 0)).replace('
+        
+        # Data table
+        st.subheader("📋 Product Data & Selection")
+        
+        # Product Selection Mode
+        selection_mode = st.radio(
+            "Selection Mode:",
+            ["Download All Products", "Select Specific Products", "Use Filters Only"],
+            horizontal=True,
+            help="Choose how you want to select products for download"
+        )
+        
+        # Filters section
+        st.subheader("🔍 Filters")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            vendors_available = sorted(list(set(p.get('Vendor', '') for p in all_products if p.get('Vendor'))))
+            vendor_filter = st.multiselect(
+                "Filter by Vendor:",
+                options=vendors_available,
+                default=[]
+            )
+        with col2:
+            collections_available = sorted(list(set(p.get('Collection', '') for p in all_products if p.get('Collection'))))
+            collection_filter = st.multiselect(
+                "Filter by Collection:",
+                options=collections_available,
+                default=[]
+            )
+        with col3:
+            types_available = sorted(list(set(p.get('Type', '') for p in all_products if p.get('Type'))))
+            product_type_filter = st.multiselect(
+                "Filter by Product Type:",
+                options=types_available,
+                default=[]
+            )
+        
+        # Apply filters
+        filtered_df = df.copy()
+        if vendor_filter:
+            filtered_df = filtered_df[filtered_df['Vendor'].isin(vendor_filter)]
+        if collection_filter:
+            filtered_df = filtered_df[filtered_df['Collection'].isin(collection_filter)]
+        if product_type_filter:
+            filtered_df = filtered_df[filtered_df['Type'].isin(product_type_filter)]
+        
+        # Product Selection Interface
+        selected_products_df = filtered_df.copy()
+        
+        if selection_mode == "Select Specific Products":
+            st.subheader("🎯 Product Selection")
+            
+            # Create a summary view for product selection
+            product_summary = []
+            seen_handles = set()
+            
+            for _, row in filtered_df.iterrows():
+                handle = row['Handle']
+                if handle and handle not in seen_handles:
+                    seen_handles.add(handle)
+                    
+                    # Get product info
+                    product_rows = filtered_df[filtered_df['Handle'] == handle]
+                    variant_count = len(product_rows[product_rows['Variant Title'] != ''])
+                    image_count = len(product_rows[product_rows['Image Src'] != ''])
+                    
+                    # Get price range
+                    prices = [float(str(p).replace('
+        
+        # Preview section
+        if not selected_products_df.empty:
+            st.subheader("👀 Data Preview")
+            
+            # Show summary stats for selected data
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                unique_products = len(selected_products_df['Handle'].unique())
+                st.metric("Selected Products", unique_products)
+            with col2:
+                total_rows = len(selected_products_df)
+                st.metric("Total Rows", total_rows)
+            with col3:
+                available_count = sum(1 for val in selected_products_df['Available'] if val == 'TRUE')
+                st.metric("Available Items", available_count)
+            with col4:
+                prices = [float(str(p).replace('
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '')) 
+                             for p in product_rows['Variant Price'] 
+                             if p and str(p).replace('
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '').replace('.', '').isdigit()]
+                    
+                    price_range = f"${min(prices):.2f}" if prices else "N/A"
+                    if len(prices) > 1 and min(prices) != max(prices):
+                        price_range += f" - ${max(prices):.2f}"
+                    
+                    product_summary.append({
+                        'Select': False,
+                        'Handle': handle,
+                        'Title': row['Title'],
+                        'Vendor': row['Vendor'],
+                        'Type': row['Type'],
+                        'Collection': row['Collection'],
+                        'Price Range': price_range,
+                        'Variants': variant_count,
+                        'Images': image_count,
+                        'Available': 'YES' if any(product_rows['Available'] == 'TRUE') else 'NO'
+                    })
+            
+            # Display product selection table
+            if product_summary:
+                st.info(f"📊 Found {len(product_summary)} unique products. Select the ones you want to download:")
+                
+                # Add "Select All" / "Deselect All" buttons
+                col1, col2, col3 = st.columns([1, 1, 4])
+                with col1:
+                    if st.button("✅ Select All", key="select_all_btn"):
+                        st.session_state.select_all_products = True
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Deselect All", key="deselect_all_btn"):
+                        st.session_state.select_all_products = False
+                        st.rerun()
+                
+                # Handle select all functionality
+                if hasattr(st.session_state, 'select_all_products'):
+                    for item in product_summary:
+                        item['Select'] = st.session_state.select_all_products
+                    # Clear the flag after applying
+                    if hasattr(st.session_state, 'select_all_products'):
+                        delattr(st.session_state, 'select_all_products')
+                
+                # Create the selection interface
+                selection_key = f"product_selection_{hash(str(selected_handles)) if 'selected_handles' in locals() else 'initial'}"
+                
+                edited_df = st.data_editor(
+                    pd.DataFrame(product_summary),
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn(
+                            "Select",
+                            help="Check to include this product in download",
+                            default=False,
+                        ),
+                        "Handle": st.column_config.TextColumn("Handle", width="medium"),
+                        "Title": st.column_config.TextColumn("Product Title", width="large"),
+                        "Vendor": st.column_config.TextColumn("Vendor", width="medium"),
+                        "Type": st.column_config.TextColumn("Type", width="medium"),
+                        "Collection": st.column_config.TextColumn("Collection", width="medium"),
+                        "Price Range": st.column_config.TextColumn("Price Range", width="small"),
+                        "Variants": st.column_config.NumberColumn("Variants", width="small"),
+                        "Images": st.column_config.NumberColumn("Images", width="small"),
+                        "Available": st.column_config.TextColumn("Available", width="small"),
+                    },
+                    disabled=["Handle", "Title", "Vendor", "Type", "Collection", "Price Range", "Variants", "Images", "Available"],
+                    hide_index=True,
+                    use_container_width=True,
+                    key=selection_key
+                )
+                
+                # Filter based on selected products
+                selected_handles = edited_df[edited_df['Select'] == True]['Handle'].tolist()
+                
+                if selected_handles:
+                    selected_products_df = filtered_df[filtered_df['Handle'].isin(selected_handles)]
+                    st.success(f"✅ Selected {len(selected_handles)} products ({len(selected_products_df)} total rows including variants and images)")
+                else:
+                    selected_products_df = pd.DataFrame()  # Empty dataframe
+                    st.warning("⚠️ No products selected. Please select at least one product to download.")
+            else:
+                st.warning("No products found matching your filters.")
+                selected_products_df = pd.DataFrame()
+        
+        elif selection_mode == "Use Filters Only":
+            st.info(f"📊 Using filtered data: {len(filtered_df)} rows from your applied filters")
+            selected_products_df = filtered_df
+        else:  # Download All Products
+            st.info(f"📊 Using all scraped data: {len(df)} total rows")
+            selected_products_df = df
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '')) 
+                         for p in selected_products_df['Variant Price'] 
+                         if p and str(p).replace('
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '')) 
+                             for p in product_rows['Variant Price'] 
+                             if p and str(p).replace('
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '').replace('.', '').isdigit()]
+                    
+                    price_range = f"${min(prices):.2f}" if prices else "N/A"
+                    if len(prices) > 1 and min(prices) != max(prices):
+                        price_range += f" - ${max(prices):.2f}"
+                    
+                    product_summary.append({
+                        'Select': False,
+                        'Handle': handle,
+                        'Title': row['Title'],
+                        'Vendor': row['Vendor'],
+                        'Type': row['Type'],
+                        'Collection': row['Collection'],
+                        'Price Range': price_range,
+                        'Variants': variant_count,
+                        'Images': image_count,
+                        'Available': 'YES' if any(product_rows['Available'] == 'TRUE') else 'NO'
+                    })
+            
+            # Display product selection table
+            if product_summary:
+                st.info(f"📊 Found {len(product_summary)} unique products. Select the ones you want to download:")
+                
+                # Add "Select All" / "Deselect All" buttons
+                col1, col2, col3 = st.columns([1, 1, 4])
+                with col1:
+                    if st.button("✅ Select All"):
+                        for item in product_summary:
+                            item['Select'] = True
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Deselect All"):
+                        for item in product_summary:
+                            item['Select'] = False
+                        st.rerun()
+                
+                # Create the selection interface
+                edited_df = st.data_editor(
+                    pd.DataFrame(product_summary),
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn(
+                            "Select",
+                            help="Check to include this product in download",
+                            default=False,
+                        ),
+                        "Handle": st.column_config.TextColumn("Handle", width="medium"),
+                        "Title": st.column_config.TextColumn("Product Title", width="large"),
+                        "Vendor": st.column_config.TextColumn("Vendor", width="medium"),
+                        "Type": st.column_config.TextColumn("Type", width="medium"),
+                        "Collection": st.column_config.TextColumn("Collection", width="medium"),
+                        "Price Range": st.column_config.TextColumn("Price Range", width="small"),
+                        "Variants": st.column_config.NumberColumn("Variants", width="small"),
+                        "Images": st.column_config.NumberColumn("Images", width="small"),
+                        "Available": st.column_config.TextColumn("Available", width="small"),
+                    },
+                    disabled=["Handle", "Title", "Vendor", "Type", "Collection", "Price Range", "Variants", "Images", "Available"],
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # Filter based on selected products
+                selected_handles = edited_df[edited_df['Select'] == True]['Handle'].tolist()
+                
+                if selected_handles:
+                    selected_products_df = filtered_df[filtered_df['Handle'].isin(selected_handles)]
+                    st.success(f"✅ Selected {len(selected_handles)} products ({len(selected_products_df)} total rows including variants and images)")
+                else:
+                    selected_products_df = pd.DataFrame()  # Empty dataframe
+                    st.warning("⚠️ No products selected. Please select at least one product to download.")
+            else:
+                st.warning("No products found matching your filters.")
+                selected_products_df = pd.DataFrame()
+        
+        elif selection_mode == "Use Filters Only":
+            st.info(f"📊 Using filtered data: {len(filtered_df)} rows from your applied filters")
+            selected_products_df = filtered_df
+        else:  # Download All Products
+            st.info(f"📊 Using all scraped data: {len(df)} total rows")
+            selected_products_df = df
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '').replace('.', '').isdigit()]
+                avg_price = sum(prices) / len(prices) if prices else 0
+                st.metric("Avg Price", f"${avg_price:.2f}")
+            
+            # Display preview of selected data
+            st.dataframe(
+                selected_products_df.head(20), 
+                use_container_width=True,
+                column_config={
+                    "Body (HTML)": st.column_config.TextColumn(
+                        "Description (HTML)",
+                        help="Full product description in HTML format",
+                        width="large"
+                    ),
+                    "Description": st.column_config.TextColumn(
+                        "Description (Text)",
+                        help="Product description as plain text",
+                        width="large"
+                    ),
+                    "Image Src": st.column_config.ImageColumn(
+                        "Main Image",
+                        help="Primary product image"
+                    )
+                }
+            )
+            
+            if len(selected_products_df) > 20:
+                st.info(f"Showing first 20 rows. Total selected: {len(selected_products_df)} rows")
+        
+        # Download section
+        st.subheader("💾 Download Selected Data")
+        
+        if not selected_products_df.empty:
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.success(f"✅ Ready to download {len(selected_products_df)} rows from {len(selected_products_df['Handle'].unique())} products")
+            
+            with col2:
+                download_format = st.selectbox("Format:", ["CSV", "JSON", "Excel"])
+            
+            # Generate download based on format
+            if download_format == "CSV":
+                csv_data = selected_products_df.to_csv(index=False)
+                st.download_button(
+                    label="📄 Download Selected Products (CSV)",
+                    data=csv_data,
+                    file_name=f"shopify_selected_products_{int(time.time())}.csv",
+                    mime="text/csv",
+                    type="primary"
+                )
+            elif download_format == "JSON":
+                json_data = selected_products_df.to_json(orient='records', indent=2)
+                st.download_button(
+                    label="📄 Download Selected Products (JSON)",
+                    data=json_data,
+                    file_name=f"shopify_selected_products_{int(time.time())}.json",
+                    mime="application/json",
+                    type="primary"
+                )
+            elif download_format == "Excel":
+                csv_data = selected_products_df.to_csv(index=False)
+                st.download_button(
+                    label="📄 Download Selected Products (Excel/CSV)",
+                    data=csv_data,
+                    file_name=f"shopify_selected_products_{int(time.time())}.csv",
+                    mime="text/csv",
+                    type="primary"
+                )
+            
+            # Additional download options
+            with st.expander("📊 Additional Download Options"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**Product Summary CSV:**")
+                    # Create a summary-only CSV
+                    summary_data = []
+                    for handle in selected_products_df['Handle'].unique():
+                        if handle:
+                            product_rows = selected_products_df[selected_products_df['Handle'] == handle]
+                            first_row = product_rows.iloc[0]
+                            
+                            summary_data.append({
+                                'Handle': handle,
+                                'Title': first_row['Title'],
+                                'Vendor': first_row['Vendor'],
+                                'Type': first_row['Type'],
+                                'Collection': first_row['Collection'],
+                                'Tags': first_row['Tags'],
+                                'Variant Count': len(product_rows[product_rows['Variant Title'] != '']),
+                                'Image Count': len(product_rows[product_rows['Image Src'] != '']),
+                                'Available': 'YES' if any(product_rows['Available'] == 'TRUE') else 'NO'
+                            })
+                    
+                    summary_csv = pd.DataFrame(summary_data).to_csv(index=False)
+                    st.download_button(
+                        label="📋 Download Product Summary",
+                        data=summary_csv,
+                        file_name=f"shopify_product_summary_{int(time.time())}.csv",
+                        mime="text/csv"
+                    )
+                
+                with col2:
+                    st.markdown("**Images Only CSV:**")
+                    # Create images-only CSV
+                    images_only = selected_products_df[selected_products_df['Image Src'] != ''][
+                        ['Handle', 'Title', 'Image Src', 'Image Position', 'Image Alt Text']
+                    ].copy()
+                    
+                    if not images_only.empty:
+                        images_csv = images_only.to_csv(index=False)
+                        st.download_button(
+                            label="🖼️ Download Images List",
+                            data=images_csv,
+                            file_name=f"shopify_images_{int(time.time())}.csv",
+                            mime="text/csv"
+                        )
+                    else:
+                        st.write("No images in selected products")
+        
+        else:
+            st.warning("⚠️ No products selected for download. Please select products above or adjust your filters.")
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '')) 
+                             for p in product_rows['Variant Price'] 
+                             if p and str(p).replace('
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '').replace('.', '').isdigit()]
+                    
+                    price_range = f"${min(prices):.2f}" if prices else "N/A"
+                    if len(prices) > 1 and min(prices) != max(prices):
+                        price_range += f" - ${max(prices):.2f}"
+                    
+                    product_summary.append({
+                        'Select': False,
+                        'Handle': handle,
+                        'Title': row['Title'],
+                        'Vendor': row['Vendor'],
+                        'Type': row['Type'],
+                        'Collection': row['Collection'],
+                        'Price Range': price_range,
+                        'Variants': variant_count,
+                        'Images': image_count,
+                        'Available': 'YES' if any(product_rows['Available'] == 'TRUE') else 'NO'
+                    })
+            
+            # Display product selection table
+            if product_summary:
+                st.info(f"📊 Found {len(product_summary)} unique products. Select the ones you want to download:")
+                
+                # Add "Select All" / "Deselect All" buttons
+                col1, col2, col3 = st.columns([1, 1, 4])
+                with col1:
+                    if st.button("✅ Select All"):
+                        for item in product_summary:
+                            item['Select'] = True
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Deselect All"):
+                        for item in product_summary:
+                            item['Select'] = False
+                        st.rerun()
+                
+                # Create the selection interface
+                edited_df = st.data_editor(
+                    pd.DataFrame(product_summary),
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn(
+                            "Select",
+                            help="Check to include this product in download",
+                            default=False,
+                        ),
+                        "Handle": st.column_config.TextColumn("Handle", width="medium"),
+                        "Title": st.column_config.TextColumn("Product Title", width="large"),
+                        "Vendor": st.column_config.TextColumn("Vendor", width="medium"),
+                        "Type": st.column_config.TextColumn("Type", width="medium"),
+                        "Collection": st.column_config.TextColumn("Collection", width="medium"),
+                        "Price Range": st.column_config.TextColumn("Price Range", width="small"),
+                        "Variants": st.column_config.NumberColumn("Variants", width="small"),
+                        "Images": st.column_config.NumberColumn("Images", width="small"),
+                        "Available": st.column_config.TextColumn("Available", width="small"),
+                    },
+                    disabled=["Handle", "Title", "Vendor", "Type", "Collection", "Price Range", "Variants", "Images", "Available"],
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # Filter based on selected products
+                selected_handles = edited_df[edited_df['Select'] == True]['Handle'].tolist()
+                
+                if selected_handles:
+                    selected_products_df = filtered_df[filtered_df['Handle'].isin(selected_handles)]
+                    st.success(f"✅ Selected {len(selected_handles)} products ({len(selected_products_df)} total rows including variants and images)")
+                else:
+                    selected_products_df = pd.DataFrame()  # Empty dataframe
+                    st.warning("⚠️ No products selected. Please select at least one product to download.")
+            else:
+                st.warning("No products found matching your filters.")
+                selected_products_df = pd.DataFrame()
+        
+        elif selection_mode == "Use Filters Only":
+            st.info(f"📊 Using filtered data: {len(filtered_df)} rows from your applied filters")
+            selected_products_df = filtered_df
+        else:  # Download All Products
+            st.info(f"📊 Using all scraped data: {len(df)} total rows")
+            selected_products_df = df
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '')) for p in all_products if p.get('Variant Price') and str(p.get('Variant Price', '')).replace('
+        
+        # Data table
+        st.subheader("📋 Product Data & Selection")
+        
+        # Product Selection Mode
+        selection_mode = st.radio(
+            "Selection Mode:",
+            ["Download All Products", "Select Specific Products", "Use Filters Only"],
+            horizontal=True,
+            help="Choose how you want to select products for download"
+        )
+        
+        # Filters section
+        st.subheader("🔍 Filters")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            vendors_available = sorted(list(set(p.get('Vendor', '') for p in all_products if p.get('Vendor'))))
+            vendor_filter = st.multiselect(
+                "Filter by Vendor:",
+                options=vendors_available,
+                default=[]
+            )
+        with col2:
+            collections_available = sorted(list(set(p.get('Collection', '') for p in all_products if p.get('Collection'))))
+            collection_filter = st.multiselect(
+                "Filter by Collection:",
+                options=collections_available,
+                default=[]
+            )
+        with col3:
+            types_available = sorted(list(set(p.get('Type', '') for p in all_products if p.get('Type'))))
+            product_type_filter = st.multiselect(
+                "Filter by Product Type:",
+                options=types_available,
+                default=[]
+            )
+        
+        # Apply filters
+        filtered_df = df.copy()
+        if vendor_filter:
+            filtered_df = filtered_df[filtered_df['Vendor'].isin(vendor_filter)]
+        if collection_filter:
+            filtered_df = filtered_df[filtered_df['Collection'].isin(collection_filter)]
+        if product_type_filter:
+            filtered_df = filtered_df[filtered_df['Type'].isin(product_type_filter)]
+        
+        # Product Selection Interface
+        selected_products_df = filtered_df.copy()
+        
+        if selection_mode == "Select Specific Products":
+            st.subheader("🎯 Product Selection")
+            
+            # Create a summary view for product selection
+            product_summary = []
+            seen_handles = set()
+            
+            for _, row in filtered_df.iterrows():
+                handle = row['Handle']
+                if handle and handle not in seen_handles:
+                    seen_handles.add(handle)
+                    
+                    # Get product info
+                    product_rows = filtered_df[filtered_df['Handle'] == handle]
+                    variant_count = len(product_rows[product_rows['Variant Title'] != ''])
+                    image_count = len(product_rows[product_rows['Image Src'] != ''])
+                    
+                    # Get price range
+                    prices = [float(str(p).replace('
+        
+        # Preview section
+        if not selected_products_df.empty:
+            st.subheader("👀 Data Preview")
+            
+            # Show summary stats for selected data
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                unique_products = len(selected_products_df['Handle'].unique())
+                st.metric("Selected Products", unique_products)
+            with col2:
+                total_rows = len(selected_products_df)
+                st.metric("Total Rows", total_rows)
+            with col3:
+                available_count = sum(1 for val in selected_products_df['Available'] if val == 'TRUE')
+                st.metric("Available Items", available_count)
+            with col4:
+                prices = [float(str(p).replace('
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '')) 
+                             for p in product_rows['Variant Price'] 
+                             if p and str(p).replace('
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '').replace('.', '').isdigit()]
+                    
+                    price_range = f"${min(prices):.2f}" if prices else "N/A"
+                    if len(prices) > 1 and min(prices) != max(prices):
+                        price_range += f" - ${max(prices):.2f}"
+                    
+                    product_summary.append({
+                        'Select': False,
+                        'Handle': handle,
+                        'Title': row['Title'],
+                        'Vendor': row['Vendor'],
+                        'Type': row['Type'],
+                        'Collection': row['Collection'],
+                        'Price Range': price_range,
+                        'Variants': variant_count,
+                        'Images': image_count,
+                        'Available': 'YES' if any(product_rows['Available'] == 'TRUE') else 'NO'
+                    })
+            
+            # Display product selection table
+            if product_summary:
+                st.info(f"📊 Found {len(product_summary)} unique products. Select the ones you want to download:")
+                
+                # Add "Select All" / "Deselect All" buttons
+                col1, col2, col3 = st.columns([1, 1, 4])
+                with col1:
+                    if st.button("✅ Select All"):
+                        for item in product_summary:
+                            item['Select'] = True
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Deselect All"):
+                        for item in product_summary:
+                            item['Select'] = False
+                        st.rerun()
+                
+                # Create the selection interface
+                edited_df = st.data_editor(
+                    pd.DataFrame(product_summary),
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn(
+                            "Select",
+                            help="Check to include this product in download",
+                            default=False,
+                        ),
+                        "Handle": st.column_config.TextColumn("Handle", width="medium"),
+                        "Title": st.column_config.TextColumn("Product Title", width="large"),
+                        "Vendor": st.column_config.TextColumn("Vendor", width="medium"),
+                        "Type": st.column_config.TextColumn("Type", width="medium"),
+                        "Collection": st.column_config.TextColumn("Collection", width="medium"),
+                        "Price Range": st.column_config.TextColumn("Price Range", width="small"),
+                        "Variants": st.column_config.NumberColumn("Variants", width="small"),
+                        "Images": st.column_config.NumberColumn("Images", width="small"),
+                        "Available": st.column_config.TextColumn("Available", width="small"),
+                    },
+                    disabled=["Handle", "Title", "Vendor", "Type", "Collection", "Price Range", "Variants", "Images", "Available"],
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # Filter based on selected products
+                selected_handles = edited_df[edited_df['Select'] == True]['Handle'].tolist()
+                
+                if selected_handles:
+                    selected_products_df = filtered_df[filtered_df['Handle'].isin(selected_handles)]
+                    st.success(f"✅ Selected {len(selected_handles)} products ({len(selected_products_df)} total rows including variants and images)")
+                else:
+                    selected_products_df = pd.DataFrame()  # Empty dataframe
+                    st.warning("⚠️ No products selected. Please select at least one product to download.")
+            else:
+                st.warning("No products found matching your filters.")
+                selected_products_df = pd.DataFrame()
+        
+        elif selection_mode == "Use Filters Only":
+            st.info(f"📊 Using filtered data: {len(filtered_df)} rows from your applied filters")
+            selected_products_df = filtered_df
+        else:  # Download All Products
+            st.info(f"📊 Using all scraped data: {len(df)} total rows")
+            selected_products_df = df
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '')) 
+                         for p in selected_products_df['Variant Price'] 
+                         if p and str(p).replace('
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '')) 
+                             for p in product_rows['Variant Price'] 
+                             if p and str(p).replace('
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '').replace('.', '').isdigit()]
+                    
+                    price_range = f"${min(prices):.2f}" if prices else "N/A"
+                    if len(prices) > 1 and min(prices) != max(prices):
+                        price_range += f" - ${max(prices):.2f}"
+                    
+                    product_summary.append({
+                        'Select': False,
+                        'Handle': handle,
+                        'Title': row['Title'],
+                        'Vendor': row['Vendor'],
+                        'Type': row['Type'],
+                        'Collection': row['Collection'],
+                        'Price Range': price_range,
+                        'Variants': variant_count,
+                        'Images': image_count,
+                        'Available': 'YES' if any(product_rows['Available'] == 'TRUE') else 'NO'
+                    })
+            
+            # Display product selection table
+            if product_summary:
+                st.info(f"📊 Found {len(product_summary)} unique products. Select the ones you want to download:")
+                
+                # Add "Select All" / "Deselect All" buttons
+                col1, col2, col3 = st.columns([1, 1, 4])
+                with col1:
+                    if st.button("✅ Select All"):
+                        for item in product_summary:
+                            item['Select'] = True
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Deselect All"):
+                        for item in product_summary:
+                            item['Select'] = False
+                        st.rerun()
+                
+                # Create the selection interface
+                edited_df = st.data_editor(
+                    pd.DataFrame(product_summary),
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn(
+                            "Select",
+                            help="Check to include this product in download",
+                            default=False,
+                        ),
+                        "Handle": st.column_config.TextColumn("Handle", width="medium"),
+                        "Title": st.column_config.TextColumn("Product Title", width="large"),
+                        "Vendor": st.column_config.TextColumn("Vendor", width="medium"),
+                        "Type": st.column_config.TextColumn("Type", width="medium"),
+                        "Collection": st.column_config.TextColumn("Collection", width="medium"),
+                        "Price Range": st.column_config.TextColumn("Price Range", width="small"),
+                        "Variants": st.column_config.NumberColumn("Variants", width="small"),
+                        "Images": st.column_config.NumberColumn("Images", width="small"),
+                        "Available": st.column_config.TextColumn("Available", width="small"),
+                    },
+                    disabled=["Handle", "Title", "Vendor", "Type", "Collection", "Price Range", "Variants", "Images", "Available"],
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # Filter based on selected products
+                selected_handles = edited_df[edited_df['Select'] == True]['Handle'].tolist()
+                
+                if selected_handles:
+                    selected_products_df = filtered_df[filtered_df['Handle'].isin(selected_handles)]
+                    st.success(f"✅ Selected {len(selected_handles)} products ({len(selected_products_df)} total rows including variants and images)")
+                else:
+                    selected_products_df = pd.DataFrame()  # Empty dataframe
+                    st.warning("⚠️ No products selected. Please select at least one product to download.")
+            else:
+                st.warning("No products found matching your filters.")
+                selected_products_df = pd.DataFrame()
+        
+        elif selection_mode == "Use Filters Only":
+            st.info(f"📊 Using filtered data: {len(filtered_df)} rows from your applied filters")
+            selected_products_df = filtered_df
+        else:  # Download All Products
+            st.info(f"📊 Using all scraped data: {len(df)} total rows")
+            selected_products_df = df
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '').replace('.', '').isdigit()]
+                avg_price = sum(prices) / len(prices) if prices else 0
+                st.metric("Avg Price", f"${avg_price:.2f}")
+            
+            # Display preview of selected data
+            st.dataframe(
+                selected_products_df.head(20), 
+                use_container_width=True,
+                column_config={
+                    "Body (HTML)": st.column_config.TextColumn(
+                        "Description (HTML)",
+                        help="Full product description in HTML format",
+                        width="large"
+                    ),
+                    "Description": st.column_config.TextColumn(
+                        "Description (Text)",
+                        help="Product description as plain text",
+                        width="large"
+                    ),
+                    "Image Src": st.column_config.ImageColumn(
+                        "Main Image",
+                        help="Primary product image"
+                    )
+                }
+            )
+            
+            if len(selected_products_df) > 20:
+                st.info(f"Showing first 20 rows. Total selected: {len(selected_products_df)} rows")
+        
+        # Download section
+        st.subheader("💾 Download Selected Data")
+        
+        if not selected_products_df.empty:
+            col1, col2 = st.columns([3, 1])
+            
+            with col1:
+                st.success(f"✅ Ready to download {len(selected_products_df)} rows from {len(selected_products_df['Handle'].unique())} products")
+            
+            with col2:
+                download_format = st.selectbox("Format:", ["CSV", "JSON", "Excel"])
+            
+            # Generate download based on format
+            if download_format == "CSV":
+                csv_data = selected_products_df.to_csv(index=False)
+                st.download_button(
+                    label="📄 Download Selected Products (CSV)",
+                    data=csv_data,
+                    file_name=f"shopify_selected_products_{int(time.time())}.csv",
+                    mime="text/csv",
+                    type="primary"
+                )
+            elif download_format == "JSON":
+                json_data = selected_products_df.to_json(orient='records', indent=2)
+                st.download_button(
+                    label="📄 Download Selected Products (JSON)",
+                    data=json_data,
+                    file_name=f"shopify_selected_products_{int(time.time())}.json",
+                    mime="application/json",
+                    type="primary"
+                )
+            elif download_format == "Excel":
+                csv_data = selected_products_df.to_csv(index=False)
+                st.download_button(
+                    label="📄 Download Selected Products (Excel/CSV)",
+                    data=csv_data,
+                    file_name=f"shopify_selected_products_{int(time.time())}.csv",
+                    mime="text/csv",
+                    type="primary"
+                )
+            
+            # Additional download options
+            with st.expander("📊 Additional Download Options"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**Product Summary CSV:**")
+                    # Create a summary-only CSV
+                    summary_data = []
+                    for handle in selected_products_df['Handle'].unique():
+                        if handle:
+                            product_rows = selected_products_df[selected_products_df['Handle'] == handle]
+                            first_row = product_rows.iloc[0]
+                            
+                            summary_data.append({
+                                'Handle': handle,
+                                'Title': first_row['Title'],
+                                'Vendor': first_row['Vendor'],
+                                'Type': first_row['Type'],
+                                'Collection': first_row['Collection'],
+                                'Tags': first_row['Tags'],
+                                'Variant Count': len(product_rows[product_rows['Variant Title'] != '']),
+                                'Image Count': len(product_rows[product_rows['Image Src'] != '']),
+                                'Available': 'YES' if any(product_rows['Available'] == 'TRUE') else 'NO'
+                            })
+                    
+                    summary_csv = pd.DataFrame(summary_data).to_csv(index=False)
+                    st.download_button(
+                        label="📋 Download Product Summary",
+                        data=summary_csv,
+                        file_name=f"shopify_product_summary_{int(time.time())}.csv",
+                        mime="text/csv"
+                    )
+                
+                with col2:
+                    st.markdown("**Images Only CSV:**")
+                    # Create images-only CSV
+                    images_only = selected_products_df[selected_products_df['Image Src'] != ''][
+                        ['Handle', 'Title', 'Image Src', 'Image Position', 'Image Alt Text']
+                    ].copy()
+                    
+                    if not images_only.empty:
+                        images_csv = images_only.to_csv(index=False)
+                        st.download_button(
+                            label="🖼️ Download Images List",
+                            data=images_csv,
+                            file_name=f"shopify_images_{int(time.time())}.csv",
+                            mime="text/csv"
+                        )
+                    else:
+                        st.write("No images in selected products")
+        
+        else:
+            st.warning("⚠️ No products selected for download. Please select products above or adjust your filters.")
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '')) 
+                             for p in product_rows['Variant Price'] 
+                             if p and str(p).replace('
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '').replace('.', '').isdigit()]
+                    
+                    price_range = f"${min(prices):.2f}" if prices else "N/A"
+                    if len(prices) > 1 and min(prices) != max(prices):
+                        price_range += f" - ${max(prices):.2f}"
+                    
+                    product_summary.append({
+                        'Select': False,
+                        'Handle': handle,
+                        'Title': row['Title'],
+                        'Vendor': row['Vendor'],
+                        'Type': row['Type'],
+                        'Collection': row['Collection'],
+                        'Price Range': price_range,
+                        'Variants': variant_count,
+                        'Images': image_count,
+                        'Available': 'YES' if any(product_rows['Available'] == 'TRUE') else 'NO'
+                    })
+            
+            # Display product selection table
+            if product_summary:
+                st.info(f"📊 Found {len(product_summary)} unique products. Select the ones you want to download:")
+                
+                # Add "Select All" / "Deselect All" buttons
+                col1, col2, col3 = st.columns([1, 1, 4])
+                with col1:
+                    if st.button("✅ Select All"):
+                        for item in product_summary:
+                            item['Select'] = True
+                        st.rerun()
+                with col2:
+                    if st.button("❌ Deselect All"):
+                        for item in product_summary:
+                            item['Select'] = False
+                        st.rerun()
+                
+                # Create the selection interface
+                edited_df = st.data_editor(
+                    pd.DataFrame(product_summary),
+                    column_config={
+                        "Select": st.column_config.CheckboxColumn(
+                            "Select",
+                            help="Check to include this product in download",
+                            default=False,
+                        ),
+                        "Handle": st.column_config.TextColumn("Handle", width="medium"),
+                        "Title": st.column_config.TextColumn("Product Title", width="large"),
+                        "Vendor": st.column_config.TextColumn("Vendor", width="medium"),
+                        "Type": st.column_config.TextColumn("Type", width="medium"),
+                        "Collection": st.column_config.TextColumn("Collection", width="medium"),
+                        "Price Range": st.column_config.TextColumn("Price Range", width="small"),
+                        "Variants": st.column_config.NumberColumn("Variants", width="small"),
+                        "Images": st.column_config.NumberColumn("Images", width="small"),
+                        "Available": st.column_config.TextColumn("Available", width="small"),
+                    },
+                    disabled=["Handle", "Title", "Vendor", "Type", "Collection", "Price Range", "Variants", "Images", "Available"],
+                    hide_index=True,
+                    use_container_width=True
+                )
+                
+                # Filter based on selected products
+                selected_handles = edited_df[edited_df['Select'] == True]['Handle'].tolist()
+                
+                if selected_handles:
+                    selected_products_df = filtered_df[filtered_df['Handle'].isin(selected_handles)]
+                    st.success(f"✅ Selected {len(selected_handles)} products ({len(selected_products_df)} total rows including variants and images)")
+                else:
+                    selected_products_df = pd.DataFrame()  # Empty dataframe
+                    st.warning("⚠️ No products selected. Please select at least one product to download.")
+            else:
+                st.warning("No products found matching your filters.")
+                selected_products_df = pd.DataFrame()
+        
+        elif selection_mode == "Use Filters Only":
+            st.info(f"📊 Using filtered data: {len(filtered_df)} rows from your applied filters")
+            selected_products_df = filtered_df
+        else:  # Download All Products
+            st.info(f"📊 Using all scraped data: {len(df)} total rows")
+            selected_products_df = df
+        
+        # Display filtered data
+        st.dataframe(
+            filtered_df, 
+            use_container_width=True,
+            column_config={
+                "Body (HTML)": st.column_config.TextColumn(
+                    "Description (HTML)",
+                    help="Full product description in HTML format",
+                    width="large"
+                ),
+                "Description": st.column_config.TextColumn(
+                    "Description (Text)",
+                    help="Product description as plain text",
+                    width="large"
+                ),
+                "Image Src": st.column_config.ImageColumn(
+                    "Main Image",
+                    help="Primary product image"
+                )
+            }
+        )
+        
+        # Download section
+        st.subheader("💾 Download Data")
+        
+        if export_format == "CSV":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download CSV",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+        elif export_format == "JSON":
+            json_data = filtered_df.to_json(orient='records', indent=2)
+            st.download_button(
+                label="📄 Download JSON",
+                data=json_data,
+                file_name=f"shopify_products_{int(time.time())}.json",
+                mime="application/json"
+            )
+        elif export_format == "Excel":
+            csv_data = filtered_df.to_csv(index=False)
+            st.download_button(
+                label="📄 Download Excel (CSV format)",
+                data=csv_data,
+                file_name=f"shopify_products_{int(time.time())}.csv",
+                mime="text/csv"
+            )
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "**⚠️ Disclaimer:** Please respect the terms of service of the websites you scrape. "
+        "This tool is for educational and research purposes. Always ensure you have permission "
+        "to scrape data from websites."
+    )
+
+if __name__ == "__main__":
+    main(), '').replace(',', '').replace('.', '').isdigit()]
             avg_price = sum(prices) / len(prices) if prices else 0
             st.metric("Average Price", f"${avg_price:.2f}")
         
