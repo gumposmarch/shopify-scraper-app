@@ -177,32 +177,21 @@ def get_collections_and_products(store_url):
         return [], {}
 
 def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
-    """Parse product data into Shopify CSV compatible format"""
+    """Parse product data into Shopify CSV compatible format with proper variant handling"""
     parsed_products = []
     
     for i, product in enumerate(products):
-        # Get all variants for this product
+        # Get all variants and images
         variants = product.get('variants', [{}])
-        
-        # Get all images
         images = product.get('images', [])
-        first_image = images[0].get('src', '') if images else ''
-        
-        # Create list of all image URLs
-        all_image_urls = [img.get('src', '') for img in images if img.get('src')]
-        additional_images = all_image_urls[1:] if len(all_image_urls) > 1 else []
         
         # Get collection info
         collection_name = product.get('collection', '')
         if not collection_name and product.get('product_type'):
             collection_name = f"Type: {product['product_type']}"
         
-        # Use first variant for main product data
-        first_variant = variants[0] if variants else {}
-        
-        # Create main product record
-        parsed_product = {
-            # Shopify CSV compatible fields
+        # Create base product data
+        base_product = {
             'Handle': product.get('handle', ''),
             'Title': product.get('title', ''),
             'Body (HTML)': clean_text_for_dataframe(product.get('body_html', '')),
@@ -211,33 +200,86 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
             'Type': product.get('product_type', ''),
             'Tags': ', '.join(product.get('tags', [])),
             'Published': 'TRUE' if product.get('published_at') else 'FALSE',
-            
-            # Variant information
-            'Variant SKU': first_variant.get('sku', ''),
-            'Variant Grams': first_variant.get('grams', 0),
-            'Variant Inventory Qty': first_variant.get('inventory_quantity', 0),
-            'Variant Price': first_variant.get('price', '0'),
-            'Variant Compare At Price': first_variant.get('compare_at_price', ''),
-            'Variant Requires Shipping': 'TRUE' if first_variant.get('requires_shipping', True) else 'FALSE',
-            'Variant Taxable': 'TRUE' if first_variant.get('taxable', True) else 'FALSE',
-            'Variant Weight Unit': first_variant.get('weight_unit', 'kg'),
-            
-            # Image information
-            'Image Src': first_image,
-            'Image Position': 1,
-            
-            # Additional custom fields
             'Collection': collection_name,
-            'Available': first_variant.get('available', False),
             'Created At': product.get('created_at', ''),
             'Updated At': product.get('updated_at', ''),
-            'Additional Images': ' | '.join(additional_images) if additional_images else '',
-            'Total Images': len(all_image_urls),
-            'Variants Count': len(variants),
             'Description': clean_text_for_dataframe(BeautifulSoup(product.get('body_html', ''), 'html.parser').get_text().strip()) if product.get('body_html') else ''
         }
         
-        parsed_products.append(parsed_product)
+        # Process each variant as a separate row (Shopify CSV requirement)
+        for variant_index, variant in enumerate(variants):
+            variant_row = base_product.copy()
+            
+            # Add variant-specific data
+            variant_row.update({
+                'Option1 Name': 'Title' if variant.get('option1') else '',
+                'Option1 Value': variant.get('option1', ''),
+                'Option2 Name': 'Option2' if variant.get('option2') else '',
+                'Option2 Value': variant.get('option2', ''),
+                'Option3 Name': 'Option3' if variant.get('option3') else '',
+                'Option3 Value': variant.get('option3', ''),
+                'Variant SKU': variant.get('sku', ''),
+                'Variant Grams': variant.get('grams', 0),
+                'Variant Inventory Tracker': 'shopify',
+                'Variant Inventory Qty': variant.get('inventory_quantity', 0),
+                'Variant Inventory Policy': 'deny',
+                'Variant Fulfillment Service': 'manual',
+                'Variant Price': variant.get('price', '0'),
+                'Variant Compare At Price': variant.get('compare_at_price', ''),
+                'Variant Requires Shipping': 'TRUE' if variant.get('requires_shipping', True) else 'FALSE',
+                'Variant Taxable': 'TRUE' if variant.get('taxable', True) else 'FALSE',
+                'Variant Weight Unit': variant.get('weight_unit', 'kg'),
+                'Available': variant.get('available', False),
+                'Variants Count': len(variants),
+            })
+            
+            # Handle images for this variant
+            variant_image_id = variant.get('image_id')
+            variant_image_url = ''
+            
+            if variant_image_id:
+                # Find the specific image for this variant
+                variant_image = next((img for img in images if img.get('id') == variant_image_id), None)
+                if variant_image:
+                    variant_image_url = variant_image.get('src', '')
+            
+            # For the first variant, include the main product image
+            if variant_index == 0:
+                main_image = images[0].get('src', '') if images else ''
+                variant_row.update({
+                    'Image Src': main_image,
+                    'Image Position': 1,
+                    'Image Alt Text': images[0].get('alt', '') if images else '',
+                    'Variant Image': variant_image_url if variant_image_url else main_image,
+                    'Total Images': len(images),
+                })
+                
+                # Add all additional images as separate rows
+                for img_index, image in enumerate(images[1:], 2):  # Start from position 2
+                    image_row = base_product.copy()
+                    image_row.update({
+                        'Image Src': image.get('src', ''),
+                        'Image Position': img_index,
+                        'Image Alt Text': image.get('alt', ''),
+                        'Total Images': len(images),
+                    })
+                    # Clear variant data for image-only rows
+                    for key in image_row.keys():
+                        if key.startswith('Variant') or key.startswith('Option'):
+                            image_row[key] = ''
+                    parsed_products.append(image_row)
+                    
+            else:
+                # For subsequent variants, only include variant image if different
+                variant_row.update({
+                    'Image Src': '',  # Empty for variant rows
+                    'Image Position': '',
+                    'Image Alt Text': '',
+                    'Variant Image': variant_image_url,
+                    'Total Images': len(images),
+                })
+            
+            parsed_products.append(variant_row)
     
     return parsed_products
 
