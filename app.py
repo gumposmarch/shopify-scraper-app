@@ -362,6 +362,18 @@ def main():
         st.session_state.last_scraped_url = ""
     if 'scraping_completed' not in st.session_state:
         st.session_state.scraping_completed = False
+    
+    # Initialize filter states
+    if 'vendor_filter' not in st.session_state:
+        st.session_state.vendor_filter = []
+    if 'collection_filter' not in st.session_state:
+        st.session_state.collection_filter = []
+    if 'product_type_filter' not in st.session_state:
+        st.session_state.product_type_filter = []
+    if 'selection_mode' not in st.session_state:
+        st.session_state.selection_mode = "Download All Products"
+    if 'scraping_method' not in st.session_state:
+        st.session_state.scraping_method = "Paginated JSON API"
 
     # Header
     st.markdown('<h1 class="main-header">🛍️ Shopify Product Scraper</h1>', unsafe_allow_html=True)
@@ -390,11 +402,23 @@ def main():
         if st.session_state.scraping_completed:
             st.success(f"✅ Data loaded: {len(st.session_state.scraped_data)} rows")
             st.info(f"🔗 Last scraped: {st.session_state.last_scraped_url}")
+            
+            # Show current filter status
+            active_filters = []
+            if st.session_state.vendor_filter:
+                active_filters.append(f"Vendors: {len(st.session_state.vendor_filter)}")
+            if st.session_state.collection_filter:
+                active_filters.append(f"Collections: {len(st.session_state.collection_filter)}")
+            if st.session_state.product_type_filter:
+                active_filters.append(f"Types: {len(st.session_state.product_type_filter)}")
+            
+            if active_filters:
+                st.info(f"🔍 Active filters: {', '.join(active_filters)}")
+            
             if st.button("🗑️ Clear Data"):
-                st.session_state.scraped_data = []
-                st.session_state.collection_info = {}
-                st.session_state.last_scraped_url = ""
-                st.session_state.scraping_completed = False
+                # Clear all session state
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
                 st.rerun()
     
     # Main input section
@@ -418,8 +442,11 @@ def main():
         "Choose scraping approach:",
         ["Standard JSON API", "Paginated JSON API", "Collections-based Scraping", "All Methods Combined"],
         help="Different methods to extract more comprehensive product data",
-        key="scraping_method_key"
+        index=["Standard JSON API", "Paginated JSON API", "Collections-based Scraping", "All Methods Combined"].index(st.session_state.scraping_method),
+        key="scraping_method_radio"
     )
+    # Update session state
+    st.session_state.scraping_method = scraping_method
 
     # Information section
     with st.expander("ℹ️ How it works", expanded=False):
@@ -590,36 +617,48 @@ def main():
             ["Download All Products", "Select Specific Products", "Use Filters Only"],
             horizontal=True,
             help="Choose how you want to select products for download",
-            key="selection_mode_key"
+            index=["Download All Products", "Select Specific Products", "Use Filters Only"].index(st.session_state.selection_mode),
+            key="selection_mode_radio"
         )
+        # Update session state
+        st.session_state.selection_mode = selection_mode
         
         # Filters section
         st.subheader("🔍 Filters")
         col1, col2, col3 = st.columns(3)
+        
         with col1:
             vendors_available = sorted(list(set(p.get('Vendor', '') for p in all_products if p.get('Vendor'))))
             vendor_filter = st.multiselect(
                 "Filter by Vendor:",
                 options=vendors_available,
-                default=[],
-                key="vendor_filter_key"
+                default=st.session_state.vendor_filter,
+                key="vendor_multiselect"
             )
+            # Update session state
+            st.session_state.vendor_filter = vendor_filter
+            
         with col2:
             collections_available = sorted(list(set(p.get('Collection', '') for p in all_products if p.get('Collection'))))
             collection_filter = st.multiselect(
                 "Filter by Collection:",
                 options=collections_available,
-                default=[],
-                key="collection_filter_key"
+                default=st.session_state.collection_filter,
+                key="collection_multiselect"
             )
+            # Update session state
+            st.session_state.collection_filter = collection_filter
+            
         with col3:
             types_available = sorted(list(set(p.get('Type', '') for p in all_products if p.get('Type'))))
             product_type_filter = st.multiselect(
                 "Filter by Product Type:",
                 options=types_available,
-                default=[],
-                key="product_type_filter_key"
+                default=st.session_state.product_type_filter,
+                key="product_type_multiselect"
             )
+            # Update session state
+            st.session_state.product_type_filter = product_type_filter
         
         # Apply filters
         filtered_df = df.copy()
