@@ -182,12 +182,32 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
     
     for i, product in enumerate(products):
         # Get all variants and images
-        variants = product.get('variants', [{}])
+        variants = product.get('variants', [])
         images = product.get('images', [])
         
         # Skip products with no images (Shopify requires at least one image)
         if not images:
             continue
+        
+        # If no variants, create a default variant
+        if not variants:
+            variants = [{
+                'id': None,
+                'title': 'Default Title',
+                'option1': None,
+                'option2': None,
+                'option3': None,
+                'sku': '',
+                'grams': 0,
+                'inventory_quantity': 0,
+                'price': '0',
+                'compare_at_price': '',
+                'requires_shipping': True,
+                'taxable': True,
+                'weight_unit': 'kg',
+                'available': True,
+                'image_id': None
+            }]
         
         # Get collection info
         collection_name = product.get('collection', '')
@@ -219,8 +239,11 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
             'Description': clean_text_for_dataframe(BeautifulSoup(product.get('body_html', ''), 'html.parser').get_text().strip()) if product.get('body_html') else ''
         }
         
-        # Get main product image (always use first image as fallback)
+        # Get main product image
         main_image = images[0].get('src', '') if images else ''
+        
+        # Determine option structure based on variants
+        has_real_options = any(v.get('option1') and v.get('option1') != 'Default Title' for v in variants)
         
         # Process each variant
         for variant_index, variant in enumerate(variants):
@@ -233,14 +256,31 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
             if variant_image_id and variant_image_id in image_mapping:
                 variant_image_url = image_mapping[variant_image_id]['src']
             
+            # FIXED: Proper option handling for Shopify CSV format
+            if has_real_options:
+                # Product has real variants with options
+                variant_row.update({
+                    'Option1 Name': 'Title',  # Standard Shopify option name
+                    'Option1 Value': variant.get('option1', ''),
+                    'Option2 Name': 'Color' if variant.get('option2') else '',
+                    'Option2 Value': variant.get('option2', ''),
+                    'Option3 Name': 'Size' if variant.get('option3') else '',
+                    'Option3 Value': variant.get('option3', ''),
+                })
+            else:
+                # Product has no real variants (single variant product)
+                # CRITICAL: For single-variant products, leave ALL option fields empty
+                variant_row.update({
+                    'Option1 Name': '',
+                    'Option1 Value': '',
+                    'Option2 Name': '',
+                    'Option2 Value': '',
+                    'Option3 Name': '',
+                    'Option3 Value': '',
+                })
+            
             # Add variant-specific data
             variant_row.update({
-                'Option1 Name': 'Title' if variant.get('option1') else '',
-                'Option1 Value': variant.get('option1', ''),
-                'Option2 Name': 'Option2' if variant.get('option2') else '',
-                'Option2 Value': variant.get('option2', ''),
-                'Option3 Name': 'Option3' if variant.get('option3') else '',
-                'Option3 Value': variant.get('option3', ''),
                 'Variant SKU': variant.get('sku', ''),
                 'Variant Grams': variant.get('grams', 0),
                 'Variant Inventory Tracker': 'shopify',
@@ -252,12 +292,12 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
                 'Variant Requires Shipping': 'TRUE' if variant.get('requires_shipping', True) else 'FALSE',
                 'Variant Taxable': 'TRUE' if variant.get('taxable', True) else 'FALSE',
                 'Variant Weight Unit': variant.get('weight_unit', 'kg'),
-                'Available': variant.get('available', False),
+                'Available': 'TRUE' if variant.get('available', False) else 'FALSE',
                 'Variants Count': len(variants),
                 'Variant Title': variant.get('title', 'Default Title'),
             })
             
-            # IMPORTANT: Every row MUST have Image Src for Shopify
+            # Image handling
             if variant_index == 0:
                 # First variant gets the main product image
                 variant_row.update({
@@ -269,7 +309,7 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
             else:
                 # Subsequent variants: Use their specific image, or main image if no specific image
                 variant_row.update({
-                    'Image Src': variant_image_url,  # Always provide an image
+                    'Image Src': variant_image_url,
                     'Image Position': variant_index + 1,
                     'Image Alt Text': image_mapping.get(variant_image_id, {}).get('alt', '') if variant_image_id in image_mapping else '',
                     'Variant Image': variant_image_url,
@@ -277,37 +317,38 @@ def parse_product_data(products, fetch_detailed=False, store_url='', delay=1.0):
             
             parsed_products.append(variant_row)
         
-        # Add additional product images as separate rows (only if there are extra images)
-        for img_index, image in enumerate(images[1:], len(variants) + 1):
-            image_row = base_product.copy()
-            image_row.update({
-                'Image Src': image.get('src', ''),
-                'Image Position': img_index,
-                'Image Alt Text': image.get('alt', ''),
-                # Clear all variant-specific fields for image-only rows
-                'Option1 Name': '',
-                'Option1 Value': '',
-                'Option2 Name': '',
-                'Option2 Value': '',
-                'Option3 Name': '',
-                'Option3 Value': '',
-                'Variant SKU': '',
-                'Variant Grams': '',
-                'Variant Inventory Tracker': '',
-                'Variant Inventory Qty': '',
-                'Variant Inventory Policy': '',
-                'Variant Fulfillment Service': '',
-                'Variant Price': '',
-                'Variant Compare At Price': '',
-                'Variant Requires Shipping': '',
-                'Variant Taxable': '',
-                'Variant Weight Unit': '',
-                'Variant Image': '',
-                'Available': '',
-                'Variants Count': '',
-                'Variant Title': '',
-            })
-            parsed_products.append(image_row)
+        # FIXED: Additional images handling - only add if there are extra images beyond the first
+        if len(images) > 1:
+            for img_index, image in enumerate(images[1:], 2):  # Start from position 2
+                image_row = base_product.copy()
+                image_row.update({
+                    'Image Src': image.get('src', ''),
+                    'Image Position': img_index,
+                    'Image Alt Text': image.get('alt', ''),
+                    # CRITICAL: For image-only rows, ALL option and variant fields must be empty
+                    'Option1 Name': '',
+                    'Option1 Value': '',
+                    'Option2 Name': '',
+                    'Option2 Value': '',
+                    'Option3 Name': '',
+                    'Option3 Value': '',
+                    'Variant SKU': '',
+                    'Variant Grams': '',
+                    'Variant Inventory Tracker': '',
+                    'Variant Inventory Qty': '',
+                    'Variant Inventory Policy': '',
+                    'Variant Fulfillment Service': '',
+                    'Variant Price': '',
+                    'Variant Compare At Price': '',
+                    'Variant Requires Shipping': '',
+                    'Variant Taxable': '',
+                    'Variant Weight Unit': '',
+                    'Variant Image': '',
+                    'Available': '',
+                    'Variants Count': '',
+                    'Variant Title': '',
+                })
+                parsed_products.append(image_row)
     
     return parsed_products
 
@@ -375,6 +416,24 @@ def main():
         - Collection information (when available)
         
         **Note:** Different methods may return different amounts of data. Some stores restrict access to certain endpoints.
+        """)
+    
+    # Add CSV format information
+    with st.expander("📋 Shopify CSV Import Requirements", expanded=False):
+        st.markdown("""
+        **Important:** This tool generates CSV files that are compatible with Shopify's product import requirements:
+        
+        ✅ **Fixed Issues:**
+        - Empty option fields for single-variant products
+        - Proper option name/value pairing
+        - Correct image-only row formatting
+        - Boolean values properly formatted as TRUE/FALSE
+        
+        **CSV Structure:**
+        - Products with variants: Include Option1 Name/Value pairs
+        - Single-variant products: All option fields left empty
+        - Image-only rows: All variant and option fields empty
+        - Each row represents either a variant or an additional image
         """)
     
     # Scraping logic
@@ -472,7 +531,7 @@ def main():
         with col1:
             st.metric("Total Products", len(all_products))
         with col2:
-            available_products = sum(1 for p in all_products if p.get('Available', False))
+            available_products = sum(1 for p in all_products if p.get('Available') == 'TRUE')
             st.metric("Available Products", available_products)
         with col3:
             unique_vendors = len(set(p.get('Vendor', '') for p in all_products if p.get('Vendor')))
