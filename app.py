@@ -378,12 +378,13 @@ def main():
             max_value=5.0, 
             value=1.0, 
             step=0.5,
-            help="Add delay to be respectful to the server"
+            help="Add delay to be respectful to the server",
+            key="delay_slider_key"
         )
         
         # Export options
         st.header("📊 Export Options")
-        export_format = st.selectbox("Export Format", ["CSV", "JSON", "Excel"])
+        export_format = st.selectbox("Export Format", ["CSV", "JSON", "Excel"], key="export_format_key")
         
         # Show current session status
         if st.session_state.scraping_completed:
@@ -416,7 +417,8 @@ def main():
     scraping_method = st.radio(
         "Choose scraping approach:",
         ["Standard JSON API", "Paginated JSON API", "Collections-based Scraping", "All Methods Combined"],
-        help="Different methods to extract more comprehensive product data"
+        help="Different methods to extract more comprehensive product data",
+        key="scraping_method_key"
     )
 
     # Information section
@@ -587,7 +589,8 @@ def main():
             "Selection Mode:",
             ["Download All Products", "Select Specific Products", "Use Filters Only"],
             horizontal=True,
-            help="Choose how you want to select products for download"
+            help="Choose how you want to select products for download",
+            key="selection_mode_key"
         )
         
         # Filters section
@@ -598,21 +601,24 @@ def main():
             vendor_filter = st.multiselect(
                 "Filter by Vendor:",
                 options=vendors_available,
-                default=[]
+                default=[],
+                key="vendor_filter_key"
             )
         with col2:
             collections_available = sorted(list(set(p.get('Collection', '') for p in all_products if p.get('Collection'))))
             collection_filter = st.multiselect(
                 "Filter by Collection:",
                 options=collections_available,
-                default=[]
+                default=[],
+                key="collection_filter_key"
             )
         with col3:
             types_available = sorted(list(set(p.get('Type', '') for p in all_products if p.get('Type'))))
             product_type_filter = st.multiselect(
                 "Filter by Product Type:",
                 options=types_available,
-                default=[]
+                default=[],
+                key="product_type_filter_key"
             )
         
         # Apply filters
@@ -1139,7 +1145,7 @@ if __name__ == "__main__":
                 st.success(f"✅ Ready to download {len(selected_products_df)} rows from {len(selected_products_df['Handle'].unique())} products")
             
             with col2:
-                download_format = st.selectbox("Format:", ["CSV", "JSON", "Excel"])
+                download_format = st.selectbox("Format:", ["CSV", "JSON", "Excel"], key="download_format_key")
             
             # Generate download based on format
             if download_format == "CSV":
